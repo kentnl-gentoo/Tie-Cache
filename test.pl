@@ -1,6 +1,116 @@
 #!/usr/local/bin/perl
 
 use Cache;
+use Benchmark;
+use vars qw($Size);
+use Data::Dumper;
+
+$Size = 5000;
+$| = 1;
+
+sub report {
+    my($desc, $count, $sub) = @_;
+    print "[[ timing ]] $desc\n";
+    print timestr(timeit($count, $sub))."\n";
+    print "   ------   \n";
+}
+
+sub test {
+    my($desc, $eval) = @_;
+    my $result = eval { &$eval } ? "OK" : "ERROR - $@";
+    print "$result ... $desc\n";
+}
+
+tie %cache, 'Tie::Cache', $Size, { MaxSize => 1000 };
+my %normal;
+
+print "++++ Benchmarking operations on Tie::Cache of size $Size\n\n";
+my $i = 0;
+report(
+       "insert of $Size elements into normal %hash",
+       $Size, 
+       sub { $normal{++$i} = $i }
+      );
+
+$i = 0;
+report(
+       "insert of $Size elements into Tie::Cache %hash",
+       $Size,
+       sub { $cache{++$i} = $i }
+       );
+
+my $rv;
+$i = 0;
+report(
+       "reading $Size elements from normal %hash",
+       $Size,
+       sub { $rv = $normal{++$i} }
+       );
+$i = 0;
+report(
+       "reading $Size elements from Tie::Cache %hash",
+       $Size,
+       sub { $rv = $cache{++$i} }
+       );
+
+$i = 0;
+report(
+       "deleting $Size elements from normal %hash",
+       $Size,
+       sub { $rv = delete $normal{++$i} }
+       );
+
+$i = 0;
+report(
+       "deleting $Size elements from Tie::Cache %hash",
+       $Size,
+       sub { $rv = delete $cache{++$i} }
+       );
+
+my $over = $Size * 2;
+$i = 0;
+report(
+       "$over inserts overflowing Tie::Cache %hash ", 
+       $over,
+       sub { $cache{++$i} = $i; }
+       );
+
+print "\n++++ Testing for correctness\n\n";
+my @keys = keys %cache;
+test("number of keys in %cache = $Size",
+     sub { @keys == $Size }
+    );
+test("first key in %cache = ".($Size + 1),
+     sub { $keys[0] == $Size + 1 }
+    );
+test("last key in %cache = ".($Size + $Size),
+     sub { $keys[$#keys] == $Size + $Size }
+    );
+test("first key value in %cache = ".($Size + 1),
+     sub { $cache{$keys[0]} == $Size + 1 }
+    );
+
+delete $cache{$keys[0]};
+test("deleting key $keys[0]; no value for deleted key",
+     sub { ! $cache{$Size+1} }
+    );
+test("existance of deleted key = ! exists",
+     sub { ! exists $cache{$Size+1} }
+    );
+@keys = keys %cache;
+test("first key in %cache after delete = ".($Size + 2),
+     sub { $keys[0] == $Size + 2 }
+    );
+test("keys in cache after delete = ".($Size-1),
+     sub { keys %cache == $Size - 1 }
+     );
+
+print "\n++++ Stats for %cache\n\n";
+my $obj = tied(%cache);
+print join("\n", map { "$_:\t$obj->{$_}" } 'count', 'hit', 'miss', 'bytes');
+print "\n";
+
+exit;
 
 # personalize the Tie::Cache object, by inheriting from it
 package My::Cache;

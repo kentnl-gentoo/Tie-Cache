@@ -1,12 +1,33 @@
+$MODULE = "Tie::Cache"; $VERSION = .07; $DATE = 12/13/99;
+
++ Improved test suite to do some benchmarking, and 
+  real interpreted tests.
+
++ Performance tuning making the cache about 5-10% faster.
+
++ MaxSize setting makes it so that key/value pair lengths 
+  of MaxSize or greater will not be stored in the cache.
+  This prevents odd large entries from flushing the cache
+  of many smaller entries.
+
+- setting Debug for one Tie::Cache hash is independent of
+  another's Debug setting, before one setting would affect
+  all the rest.  To set Debug value for all Tie::Cache
+  hashes, set $Tie::Cache::Debug.
+
 $MODULE = "Tie::Cache"; $VERSION = .06; $DATE = 2/16/99;
 
 + WriteSynch config option for TRUE CACHE.  WriteSynch => 0 
   will have the dirty data be written back as late as possible.  
   WriteSynch => 1 is immediate write-through for data dirtied.
+
 - STORE returns value stored; $cache{$key} = $value returns $value now
+
 + decomped FETCH better so it doesn't use STORE internally
   necessary for new WriteSynch functionality
+
 + WriteSynch => 0 config set in test.pl to demostrate use.
+
 + Optimizations, especially for refreshing entries in cache on FETCH
 
 $MODULE = "Tie::Cache"; $VERSION = .05;
@@ -30,6 +51,7 @@ $MODULE = "Tie::Cache"; $VERSION = .02;
 
 + MaxBytes config option is new.  It allows cache size to 
   be based on the bytes the cache holds.
+
 + test.pl output has Debug set to 2, so full debugging output is
   displayed.  This allows a new user to see how cache works.
 

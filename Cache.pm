@@ -21,8 +21,10 @@ Tie::Cache - LRU Cache in Memory
  #
  # MaxCount =>	 Maximum entries in cache.
  # MaxBytes =>   Maximum bytes in cache, sum of keys and values.
- #
- # WriteSync => 1 - DEFAULT, write() when data is dirtied for 
+ # MaxSize  =>   Maximum size of each cache entry. Larger entries are not cached.
+ #                   This helps prevent much of the cache being flushed when 
+ #                   you set an exceptionally large entry.
+ # WriteSync =>  1 - DEFAULT, write() when data is dirtied for 
  #                   TRUE CACHE (see below)
  #               0 - write() dirty data as late as possible, when leaving 
  #                   cache, or when cache is being DESTROY'd
@@ -54,59 +56,63 @@ majority of the time.
 
 The implementation is a hash, for quick lookups, 
 overlaying a doubly linked list for quick insertion and deletion.
-On a PII 300, writes to the hash were done at a rate of at 
-least 3000 per second.  Work has been done to optimize refreshing 
-cache entries that are frequently read from, code like $cache{entry}, 
-which moves the entry to the end of the linked list internally.
+On a WinNT PII 300, writes to the hash were done at a rate 
+3200 per second, and reads from the hash at 6300 per second.   
+Work has been done to optimize refreshing cache entries that are 
+frequently read from, code like $cache{entry}, which moves the 
+entry to the end of the linked list internally.
 
 =cut Documentation continues at the end of the module.
 
 package Tie::Cache;
+use strict;
 use vars qw($VERSION $Debug);
 
-$VERSION = .06;
+$VERSION = .07;
 $Debug = 0; # set to 1 for summary, 2 for debug output
 
 sub TIEHASH {
-    my($class, $max_size, $options) = @_;
-    die('you must specify a size for the cache') unless $max_size;
+    my($class, $max_count, $options) = @_;
 
-    if(ref($max_size)) {
-	$options = $max_size;
-	$max_size = $options->{MaxCount};
+    if(ref($max_count)) {
+	$options = $max_count;
+	$max_count = $options->{MaxCount};
     }
 	
-    unless($max_size || $options->{MaxBytes}) {
+    unless($max_count || $options->{MaxBytes}) {
 	die('you must specify cache size with either MaxBytes or MaxCount');
     }
 
-    $Debug ||= $options->{Debug};
-    $Debug ||= 0;
     my $sync = exists($options->{WriteSync}) ? $options->{WriteSync} : 1;
 
     bless { 
-	# how many items to cache
-	max_count=> $max_size, 
-
-	# max bytes to cache
-	max_bytes => $options->{MaxBytes},
-	
-	# current sizes
-	count=>0, 
-	bytes=>0,
-
-	# inner structures
-	head=>0, 
-	tail=>0, 
-	nodes=>{},
-	'keys'=>[],
-
-	# statistics
-	hit => 0,
-	miss => 0,
-
-	# config
-	sync => $sync,
+	   # how many items to cache
+	   max_count=> $max_count, 
+	   
+	   # max bytes to cache
+	   max_bytes => $options->{MaxBytes},
+	   
+	   # max size (in bytes) of an individual cache entry
+	   max_size => $options->{MaxSize} || $options->{MaxBytes},
+	   
+	   # current sizes
+	   count=>0, 
+	   bytes=>0,
+	   
+	   # inner structures
+	   head=>0, 
+	   tail=>0, 
+	   nodes=>{},
+	   'keys'=>[],
+	   
+	   # statistics
+	   hit => 0,
+	   miss => 0,
+	   
+	   # config
+	   sync => $sync,
+	   dbg => $options->{Debug} || $Debug
+	   
 	
     }, $class;
 }
@@ -132,17 +138,17 @@ sub FETCH {
     my $node = $self->{nodes}{$key};
     if($node) {
 	# refresh node's entry
-	$self->{hit} += 1; # if $Debug;
+	$self->{hit}++; # if $self->{dbg};
 
 	# we used to call delete then insert, but we streamlined code
-	if($node->{after}) {
-	    $self->print("update() node $node to tail of list") if ($Debug > 1);
+	if(my $after = $node->{after}) {
+	    $self->{dbg} > 1 and $self->print("update() node $node to tail of list");
 	    # reconnect the nodes
-	    ($node->{after}{before} = $node->{before});
-	    if($node->{before}) {
-		($node->{before}{after} = $node->{after});
+	    my $before = $after->{before} = $node->{before};
+	    if($before) {
+		$before->{after} = $after;
 	    } else {
-		$self->{head} = $node->{after};
+		$self->{head} = $after;
 	    }
 
 	    # place at the end
@@ -157,24 +163,34 @@ sub FETCH {
 		unless($self->{tail} eq $node);
 	}
 
-	$self->print("FETCH [$key, $node->{value}]") if ($Debug > 1);
+	$self->print("FETCH [$key, $node->{value}]") if ($self->{dbg} > 1);
 	$node->{value};
     } else {
 	# we have a cache miss here
-	$self->{miss} += 1; # if $Debug;
+	$self->{miss}++; # if $self->{dbg};
 
 	# its fine to always insert a node, even when we have an undef,
 	# because even if we aren't a sub-class, we should assume use
 	# that would then set the entry.  This model works well with
 	# sub-classing and reads() that might want to return undef as
 	# a valid value.
-	$self->print("read() for key $key") if $Debug > 1;
+	$self->print("read() for key $key") if $self->{dbg} > 1;
 	my $value = $self->read($key);
+
 	if(defined $value) {
-	    $node = $self->create_node(\$key, \$value);
-	    $self->insert($node);
+	    if(defined $self->{max_size}) {
+		# check max size of entry, that it not exceed max size
+		my $length = length($value) + length($key);
+		if($length > $self->{max_size}) {
+		    $self->print("direct read() [$key, $value]") if ($self->{dbg} > 1);
+		    return $value;
+		}
+	    } 
+	    # if we get here, we should insert the new node
+	    $node = &create_node($self, \$key, \$value);
+	    &insert($self, $node);
+	    $value;
 	}
-	$value;
     }
 }
 
@@ -182,34 +198,42 @@ sub STORE {
     my($self, $key, $value) = @_;
     my $node;
 
-    $self->print("STORE [$key,$value]") if ($Debug > 1);
+    $self->print("STORE [$key,$value]") if ($self->{dbg} > 1);
+
+    # check max size of entry, that it not exceed max size
+    my $length = length($value) + length($key);
+    if(defined($self->{max_size}) and ($length > $self->{max_size})) {
+	$self->print("direct write() [$key, $value]") if ($self->{dbg} > 1);
+        $self->write($key, $value);	
+	return $value;
+    }
 
     # do we have node already ?
     if($self->{nodes}{$key}) {
-	$node = $self->delete($key);
+	$node = &delete($self, $key);
 	$node->{value} = $value;
     } 
     
     # insert new node  
-    $node ||= $self->create_node(\$key, \$value);
-    $self->insert($node);
+    $node ||= &create_node($self, \$key, \$value, $length);
+    &insert($self, $node);
 
     # if the data is sync'd call write now, otherwise defer the data
     # writing, but mark it dirty so it can be cleanup up at the end
     if($self->{sync}) {
-	$self->print("sync write() [$key, $value]") if $Debug > 1;
+	$self->print("sync write() [$key, $value]") if $self->{dbg} > 1;
 	$self->write($key, $value);
     } else {
 	$node->{dirty} = 1;
     }    
 
-    $node->{value};
+    $value;
 }
 
 sub DELETE {
     my($self, $key) = @_;
     
-    $self->print("DELETE $key") if ($Debug > 1);
+    $self->print("DELETE $key") if ($self->{dbg} > 1);
     my $node = $self->delete($key);
     my $value = $node->{value};
     undef $node;
@@ -220,12 +244,12 @@ sub DELETE {
 sub CLEAR {
     my($self) = @_;
 
-    $self->print("CLEAR CACHE") if ($Debug > 1);
+    $self->print("CLEAR CACHE") if ($self->{dbg} > 1);
     my $node;
     while($node = $self->{head}) {
 	$self->delete($self->{head}{key});
 	if($node->{dirty}) {
-	    $self->print("dirty write() [$node->{key}, $node->{value}]") if ($Debug > 1);
+	    $self->print("dirty write() [$node->{key}, $node->{value}]") if ($self->{dbg} > 1);
 	    $self->write($node->{key}, $node->{value});
 	}
     }
@@ -267,18 +291,18 @@ sub DESTROY {
     my($self) = @_;
 
     # if debugging, snapshot cache before clearing
-    if($Debug) {
+    if($self->{dbg}) {
 	if($self->{hit} || $self->{miss}) {
 	    $self->{hit_ratio} = 
 		sprintf("%4.3f", $self->{hit} / ($self->{hit} + $self->{miss})); 
 	}
 	$self->print($self->pretty_self());
-	if($Debug > 1) {
+	if($self->{dbg} > 1) {
 	    $self->print($self->pretty_chains());
 	}
     }
     
-    $self->print("DESTROYING") if $Debug > 1;
+    $self->print("DESTROYING") if $self->{dbg} > 1;
     $self->CLEAR();
     
     1;
@@ -288,16 +312,15 @@ sub DESTROY {
 ## Helper Routines
 ####PERL##LRU##TIE##CACHE##PERL##LRU##TIE##CACHE##PERL##LRU##TIE##CACHE
 
-# we build a node from locally scoped variables so we don't have to 
-# copy a lot of data in and out of this helper routine
+# we use scalar_refs for the data for speed
 sub create_node {
-    my($self, $key, $value) = @_;
+    my($self, $key, $value, $length) = @_;
     (defined($$key) && defined($$value)) 
-	|| die("need more localized data than $key and $value");
+	|| die("need more localized data than $$key and $$value");
     {
 	key=>$$key, 
 	value=>$$value, 
-	bytes=> length($$key)+length($$value),
+	bytes=> defined $length ? $length : length($$key)+length($$value),
     };
 }
 
@@ -306,10 +329,10 @@ sub insert {
     
     $new_node->{after} = 0;
     $new_node->{before} = $self->{tail};
-    $self->print("insert() [$new_node->{key}, $new_node->{value}]") if ($Debug > 1);
+    $self->print("insert() [$new_node->{key}, $new_node->{value}]") if ($self->{dbg} > 1);
     
-    my $key = $new_node->{key};
-    $self->{nodes}{$key} = $new_node;
+#    my $key = $new_node->{key};
+    $self->{nodes}{$new_node->{key}} = $new_node;
 
     # current sizes
     $self->{count}++;
@@ -326,7 +349,7 @@ sub insert {
     while(($self->{max_count} && ($self->{count} > $self->{max_count})) ||
 	  ($self->{max_bytes} && ($self->{bytes} > $self->{max_bytes}))) 
     {
-	if($Debug > 1) {
+	if($self->{dbg} > 1) {
 	    $self->print("current/max: ".
 			 "bytes ($self->{bytes}/$self->{max_bytes}) ".
 			 "count ($self->{count}/$self->{max_count}) "
@@ -335,10 +358,10 @@ sub insert {
 	my $old_node = $self->delete($self->{head}{key});
 	if($old_node->{dirty}) {
 	    $self->print("dirty write() [$old_node->{key}, $old_node->{value}]") 
-		if ($Debug > 1);
+		if ($self->{dbg} > 1);
 	    $self->write($old_node->{key}, $old_node->{value});
 	}
-#	if($Debug > 1) {
+#	if($self->{dbg} > 1) {
 #	    $self->print("after delete - bytes $self->{bytes}; count $self->{count}");
 #	}
     }
@@ -347,23 +370,26 @@ sub insert {
 }
 
 sub delete {
-    my($self, $key) = @_;
-    
-    my($node) = $self->{nodes}{$key};
-    return unless $node;
+    my($self, $key) = @_;    
+    my $node = $self->{nodes}{$key} || return;
+#    return unless $node;
 
-    $self->print("delete() [$key, $node->{value}]") if ($Debug > 1);
+    $self->print("delete() [$key, $node->{value}]") if ($self->{dbg} > 1);
 
-    if($node->{before}) {
-	($node->{before}{after} = $node->{after});
+    my $before = $node->{before};
+    my $after = $node->{after};
+
+#    my($before, $after) = $node->{before,after};
+    if($before) {
+	($before->{after} = $after);
     } else {
-	$self->{head} = $node->{after};
+	$self->{head} = $after;
     }
 
-    if($node->{after}) {
-	($node->{after}{before} = $node->{before});
+    if($after) {
+	($after->{before} = $before);
     } else {
-	$self->{tail} = $node->{before};
+	$self->{tail} = $before;
     }
 
     delete $self->{nodes}{$key};
@@ -467,9 +493,9 @@ a script.
 
  my $cache_size   = $ARGV[0] || 2;
  my $num_to_cache = $ARGV[1] || 4;   
- my $debug = $ARGV[2] || 1;
+ my $Debug = $ARGV[2] || 1;
 
- tie %cache, 'My::Cache', $cache_size, {Debug => $debug};   
+ tie %cache, 'My::Cache', $cache_size, {Debug => $Debug};   
 
  # load the cache with new data, each through its contents,
  # and then reload in reverse order.

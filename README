@@ -15,8 +15,10 @@ SYNOPSIS
      #
      # MaxCount =>   Maximum entries in cache.
      # MaxBytes =>   Maximum bytes in cache, sum of keys and values.
-     #
-     # WriteSync => 1 - DEFAULT, write() when data is dirtied for 
+     # MaxSize  =>   Maximum size of each cache entry. Larger entries are not cached.
+     #                   This helps prevent much of the cache being flushed when 
+     #                   you set an exceptionally large entry.
+     # WriteSync =>  1 - DEFAULT, write() when data is dirtied for 
      #                   TRUE CACHE (see below)
      #               0 - write() dirty data as late as possible, when leaving 
      #                   cache, or when cache is being DESTROY'd
@@ -45,11 +47,11 @@ DESCRIPTION
     of data, but only access a minority of the data a majority of the time.
 
     The implementation is a hash, for quick lookups, overlaying a doubly
-    linked list for quick insertion and deletion. On a PII 300, writes to
-    the hash were done at a rate of at least 3000 per second. Work has been
-    done to optimize refreshing cache entries that are frequently read from,
-    code like $cache{entry}, which moves the entry to the end of the linked
-    list internally.
+    linked list for quick insertion and deletion. On a WinNT PII 300, writes
+    to the hash were done at a rate 3200 per second, and reads from the hash
+    at 6300 per second. Work has been done to optimize refreshing cache
+    entries that are frequently read from, code like $cache{entry}, which
+    moves the entry to the end of the linked list internally.
 
 INSTALLATION
     Tie::Cache installs easily using the make or nmake commands as shown
@@ -97,9 +99,9 @@ TRUE CACHE EXAMPLE
 
      my $cache_size   = $ARGV[0] || 2;
      my $num_to_cache = $ARGV[1] || 4;   
-     my $debug = $ARGV[2] || 1;
+     my $Debug = $ARGV[2] || 1;
 
-     tie %cache, 'My::Cache', $cache_size, {Debug => $debug};   
+     tie %cache, 'My::Cache', $cache_size, {Debug => $Debug};   
 
      # load the cache with new data, each through its contents,
      # and then reload in reverse order.
