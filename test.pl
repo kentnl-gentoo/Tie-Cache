@@ -91,8 +91,8 @@ test("first key value in %cache = ".($Size + 1),
     );
 
 delete $cache{$keys[0]};
-test("deleting key $keys[0]; no value for deleted key",
-     sub { ! $cache{$Size+1} }
+test("deleting key $keys[0]; no value defined for deleted key",
+     sub { ! defined $cache{$keys[0]} }
     );
 test("existance of deleted key = ! exists",
      sub { ! exists $cache{$Size+1} }

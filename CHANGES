@@ -1,3 +1,10 @@
+$MODULE = "Tie::Cache"; $VERSION = .08; $DATE = 12/14/99;
+
+- FETCH, or %cache reads like $cache{key} would returned
+  a defined value, null, when it should have been undefined.
+  This would breaks tests that test for defined($cache{$key}),
+  and is a big problem.
+
 $MODULE = "Tie::Cache"; $VERSION = .07; $DATE = 12/13/99;
 
 + Improved test suite to do some benchmarking, and 

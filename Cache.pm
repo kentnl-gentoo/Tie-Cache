@@ -68,7 +68,7 @@ package Tie::Cache;
 use strict;
 use vars qw($VERSION $Debug);
 
-$VERSION = .07;
+$VERSION = .08;
 $Debug = 0; # set to 1 for summary, 2 for debug output
 
 sub TIEHASH {
@@ -190,6 +190,8 @@ sub FETCH {
 	    $node = &create_node($self, \$key, \$value);
 	    &insert($self, $node);
 	    $value;
+	} else {
+	    undef;
 	}
     }
 }
