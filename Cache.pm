@@ -1,3 +1,7 @@
+#!/usr/local/bin/perl -w
+
+=pod
+
 =head1 NAME
 
 Tie::Cache - LRU Cache in Memory
@@ -5,7 +9,19 @@ Tie::Cache - LRU Cache in Memory
 =head1 SYNOPSIS
 
  use Tie::Cache;
- tie %cache, 'Tie::Cache', 100, {Debug => 1};   
+ tie %cache, 'Tie::Cache', 100, { Debug => 1 };   
+ tie %cache2, 'Tie::Cache', { MaxCount => 100, MaxBytes => 1000 };
+
+ # Options #####################################################
+ #
+ # Debug =>	0 - DEFAULT, no debugging output
+ #		1 - prints cache statistics upon destroying
+ #		2 - prints detailed debugging info
+ #
+ # MaxCount =>	Maximum entries in cache.
+ # MaxBytes =>  Maximum bytes in cache, sum of keys and values.
+ #
+ ################################################################
 
  # cache supports normal tied hash functions
  $cache{1} = 2;       # STORE
@@ -38,20 +54,35 @@ least 3000 per second.
 =cut Documentation continues at the end of the module.
 
 package Tie::Cache;
-use Carp qw(cluck);
+$VERSION = .05;
 $Tie::Cache::Debug = 0; # set to 1 for summary, 2 for debug output
 
 sub TIEHASH {
-    my($self, $max_size, $options) = @_;
+    my($class, $max_size, $options) = @_;
     die('you must specify a size for the cache') unless $max_size;
 
+    if(ref($max_size)) {
+	$options = $max_size;
+	$max_size = $options->{MaxCount};
+    }
+	
+    unless($max_size || $options->{MaxBytes}) {
+	die('you must specify cache size with either MaxBytes or MaxCount');
+    }
+
     $Debug ||= $options->{Debug};
+    $Debug ||= 0;
+
     bless { 
 	# how many items to cache
-	max=> $max_size, 
+	max_count=> $max_size, 
+
+	# max bytes to cache
+	max_bytes => $options->{MaxBytes},
 	
-	# current size
+	# current sizes
 	count=>0, 
+	bytes=>0,
 
 	# inner structures
 	head=>0, 
@@ -63,7 +94,7 @@ sub TIEHASH {
 	hit => 0,
 	miss => 0
 
-    }, $self;
+    }, $class;
 }
 
 # override to write data leaving cache
@@ -85,12 +116,12 @@ sub FETCH {
     my $node = $self->{nodes}{$key};
     if($node) {
 	# refresh node's entry
-	$self->{hit} += 1 if $Debug;
+	$self->{hit} += 1; # if $Debug;
 	$self->delete($node->{key});
 	$self->insert($node);
     } else {
 	# we have a cache miss here
-	$self->{miss} += 1 if $Debug;
+	$self->{miss} += 1; # if $Debug;
 	$self->print("read() for key $key") if $Debug > 1;
 	$value = $self->read($key);
 	if(defined $value) {
@@ -119,7 +150,7 @@ sub STORE {
     } 
     
     # insert new node  
-    $node ||= {key=>$key, value=>$value};
+    $node ||= {key=>$key, value=>$value, bytes=> length($key)+length($value)};
     $self->insert($node);
 
     $self->print("STORE [$key,$value]")
@@ -187,10 +218,15 @@ sub DESTROY {
     my($self) = @_;
 
     # if debugging, snapshot cache before clearing
-    $self->{hit_ratio} = 
-	sprintf("%4.3f", $self->{hit} / ($self->{hit} + $self->{miss})); 
-    $self->print($self->pretty_self()) if $Debug;
-
+    if($Debug) {
+	if($self->{hit} || $self->{miss}) {
+	    $self->{hit_ratio} = 
+		sprintf("%4.3f", $self->{hit} / ($self->{hit} + $self->{miss})); 
+	}
+	$self->print($self->pretty_self());
+    }
+    
+    $self->print("DESTROYING") if $Debug > 1;
     $self->CLEAR();
     
     1;
@@ -206,10 +242,14 @@ sub insert {
     $new_node->{after} = 0;
     $new_node->{before} = $self->{tail};
 
-#    $self->print("inserting node: [$new_node->{key}, $new_node->{value}]");
+#    $self->print("inserting node: [$new_node->{key}, $new_node->{value}]")
+#	if ($Debug > 1);
     my $key = $new_node->{key};
     $self->{nodes}{$key} = $new_node;
+
+    # current sizes
     $self->{count}++;
+    $self->{bytes} += $new_node->{bytes};
 
     if($self->{tail}) {
 	$self->{tail}{after} = $new_node;
@@ -219,13 +259,24 @@ sub insert {
     $self->{tail} = $new_node;
 
     ## if we are too big now, remove head
-    if($self->{count} > $self->{max}) {
+    while(($self->{max_count} && ($self->{count} > $self->{max_count})) ||
+	  ($self->{max_bytes} && ($self->{bytes} > $self->{max_bytes}))) 
+    {
+	if($Debug > 1) {
+	    $self->print("current/max: ".
+			 "bytes ($self->{bytes}/$self->{max_bytes}) ".
+			 "count ($self->{count}/$self->{max_count}) "
+			 );
+	}
 	my $old_node = $self->delete($self->{head}{key});
 	$self->print("write() [$old_node->{key}, $old_node->{value}]") 
 	    if ($Debug > 1);
 	$self->write($old_node->{key}, $old_node->{value});
+#	if($Debug > 1) {
+#	    $self->print("after delete - bytes $self->{bytes}; count $self->{count}");
+#	}
     }
-
+    
     1;
 }
 
@@ -248,6 +299,7 @@ sub delete {
     }
 
     delete $self->{nodes}{$key};
+    $self->{bytes} -= $node->{bytes};
     $self->{count}--;
     
     $self->print("delete() $key: $node->{value}") 
@@ -266,7 +318,7 @@ sub pretty_self {
     
     my(@prints);
     for(sort keys %{$self}) { 
-	next unless $self->{$_};
+	next unless defined $self->{$_};
 	push(@prints, "$_=>$self->{$_}"); 
     }
 
@@ -360,8 +412,14 @@ is removed from the cache, often called write through.
 
 =head1 NOTES
 
-Many thanks to Tom Hukins who provided me insight and motivation for
-finishing this module.
+Many thanks to all those who helped me make this module a reality, 
+including:
+
+	:) Tom Hukins who provided me insight and motivation for
+	   finishing this module.
+	:) Jamie McCarthy, for trying to make Tie::Cache be all
+	   that it can be.
+	:) Rob Fugina who knows how to "TRULY CACHE".
 
 =head1 AUTHOR
 
