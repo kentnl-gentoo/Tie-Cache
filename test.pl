@@ -3,7 +3,6 @@
 use Cache;
 use Benchmark;
 use vars qw($Size);
-use Data::Dumper;
 
 $Size = 5000;
 $| = 1;
@@ -74,6 +73,18 @@ report(
        $over,
        sub { $cache{++$i} = $i; }
        );
+
+report(
+       "$over undef inserts, not affecting Tie::Cache %hash ",
+       $over,
+       sub { $cache{rand()} = undef; }
+      );
+
+report(
+       "$over undef reads, not affecting Tie::Cache %hash ",
+       $over,
+       sub { $cache{rand()}; }
+      );
 
 print "\n++++ Testing for correctness\n\n";
 my @keys = keys %cache;

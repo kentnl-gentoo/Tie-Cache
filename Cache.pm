@@ -1,5 +1,12 @@
 #!/usr/local/bin/perl -w
 
+package Tie::Cache;
+use strict;
+use vars qw($VERSION $Debug);
+
+$VERSION = .10;
+$Debug = 0; # set to 1 for summary, 2 for debug output
+
 =pod
 
 =head1 NAME
@@ -57,19 +64,12 @@ majority of the time.
 The implementation is a hash, for quick lookups, 
 overlaying a doubly linked list for quick insertion and deletion.
 On a WinNT PII 300, writes to the hash were done at a rate 
-3200 per second, and reads from the hash at 6300 per second.   
+3100 per second, and reads from the hash at 6300 per second.   
 Work has been done to optimize refreshing cache entries that are 
 frequently read from, code like $cache{entry}, which moves the 
 entry to the end of the linked list internally.
 
 =cut Documentation continues at the end of the module.
-
-package Tie::Cache;
-use strict;
-use vars qw($VERSION $Debug);
-
-$VERSION = .08;
-$Debug = 0; # set to 1 for summary, 2 for debug output
 
 sub TIEHASH {
     my($class, $max_count, $options) = @_;
@@ -209,6 +209,9 @@ sub STORE {
         $self->write($key, $value);	
 	return $value;
     }
+
+   # do not cache undefined values
+    defined($value) || return(undef);
 
     # do we have node already ?
     if($self->{nodes}{$key}) {
@@ -457,6 +460,27 @@ shown below.  Otherwise, just copy Cache.pm to $PERLLIB/site/Tie
 
         * use nmake for win32
         ** you can also just copy Cache.pm to $perllib/Tie
+
+=head1 BENCMARKS
+
+There is another simpler LRU cache implementation in CPAN, 
+Tie::Cache::LRU, which has the same basic size limiting 
+functionality, and for this functionality, the exact same 
+interface.  This other cache takes writes about 20% faster 
+but cache reads are about 50% slower.  Here are some numbers 
+to illustrate:
+
+ Module			Read/s	Write/s	Delete/s Platform
+ ------			------	-------	-------- --------
+ Tie::Cache v.08	 6300	3100	4800	 perl 5.00404 WinNT PII300
+ Tie::Cache::LRU v.05	 3700	3700	4500	 perl 5.00404 WinNT PII300
+ --
+ Tie::Cache v.08	10600	5300	8500	 perl 5.00503 Solaris PII300
+
+The reason for using an cache is that you are probably
+doing more reads than writes, so you will likely want to 
+use this module, but may want to consider Tie::Cache::LRU
+if your i/o mix is write heavy.  
 
 =head1 TRUE CACHE
 

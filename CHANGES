@@ -1,11 +1,22 @@
-$MODULE = "Tie::Cache"; $VERSION = .08; $DATE = 12/14/99;
+$MODULE = "Tie::Cache"; $VERSION = .10; $DATE = '11/22/00';
+
+- Allow for undef values to be stored like $cache{1} = undef
+  Really doesn't affect cache, but got rid off error message
+  in this case.
+
+$MODULE = "Tie::Cache"; $VERSION = .09; $DATE = 'TBA';
+
++ Added benchmark section comparing Tie::Cache & Tie::Cache::LRU
+
+$MODULE = "Tie::Cache"; $VERSION = .08; $DATE = '12/14/99';
 
 - FETCH, or %cache reads like $cache{key} would returned
   a defined value, null, when it should have been undefined.
   This would breaks tests that test for defined($cache{$key}),
-  and is a big problem.
+  and is a big problem.  I introduced this bug with my 
+  tuning in .07 :(
 
-$MODULE = "Tie::Cache"; $VERSION = .07; $DATE = 12/13/99;
+$MODULE = "Tie::Cache"; $VERSION = .07; $DATE = '12/13/99';
 
 + Improved test suite to do some benchmarking, and 
   real interpreted tests.
@@ -22,7 +33,7 @@ $MODULE = "Tie::Cache"; $VERSION = .07; $DATE = 12/13/99;
   all the rest.  To set Debug value for all Tie::Cache
   hashes, set $Tie::Cache::Debug.
 
-$MODULE = "Tie::Cache"; $VERSION = .06; $DATE = 2/16/99;
+$MODULE = "Tie::Cache"; $VERSION = .06; $DATE = '2/16/99';
 
 + WriteSynch config option for TRUE CACHE.  WriteSynch => 0 
   will have the dirty data be written back as late as possible.  
