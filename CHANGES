@@ -1,3 +1,22 @@
+$MODULE = "Tie::Cache"; $VERSION = .11; $DATE = 'TBA';
+
++ use of arrays for internal nodes structure instead of
+  hashes for savings on memory and lookup speed.
+
++ MaxBytes now more accurate with recursive length calculations
+  on reference keys & values, and added estimates of 240 bytes
+  per key/value pair, + 16 bytes per reference found, in addition
+  to the length of the data being stored.
+
+  A MaxBytes setting of 1000000 would then try to really limit
+  total memory consumption of the entire cache to 1M.  This is
+  relevant when being used in high process environments like mod_perl
+  where memory savings are critical.
+
++ MaxSize has default of MaxBytes/10, so large cache entries don't
+  purge many others.  If cache entry exceeds MaxSize in bytes, then
+  that value won't be cached.
+
 $MODULE = "Tie::Cache"; $VERSION = .10; $DATE = '11/22/00';
 
 - Allow for undef values to be stored like $cache{1} = undef

@@ -4,7 +4,7 @@ NAME
 SYNOPSIS
      use Tie::Cache;
      tie %cache, 'Tie::Cache', 100, { Debug => 1 };   
-     tie %cache2, 'Tie::Cache', { MaxCount => 100, MaxBytes => 1000 };
+     tie %cache2, 'Tie::Cache', { MaxCount => 100, MaxBytes => 50000 };
      tie %cache3, 'Tie::Cache', 100, { Debug => 1 , WriteSync => 0};   
 
      # Options ##################################################################
@@ -14,10 +14,18 @@ SYNOPSIS
      #               2 - prints detailed debugging info
      #
      # MaxCount =>   Maximum entries in cache.
-     # MaxBytes =>   Maximum bytes in cache, sum of keys and values.
+     #
+     # MaxBytes =>   Maximum bytes taken in memory for cache based on approximate 
+     #               size of total cache structure in memory
+     #
+     #               There is approximately 240 bytes used per key/value pair in the cache for 
+     #               the cache data structures, so a cache of 5000 entries would take
+     #               at approximately 1.2M plus the size of the data being cached.
+     #
      # MaxSize  =>   Maximum size of each cache entry. Larger entries are not cached.
      #                   This helps prevent much of the cache being flushed when 
-     #                   you set an exceptionally large entry.
+     #                   you set an exceptionally large entry.  Defaults to MaxBytes/10
+     #
      # WriteSync =>  1 - DEFAULT, write() when data is dirtied for 
      #                   TRUE CACHE (see below)
      #               0 - write() dirty data as late as possible, when leaving 
@@ -31,7 +39,7 @@ SYNOPSIS
 
      # FIRSTKEY, NEXTKEY
      while(($k, $v) = each %cache) { print "$k: $v\n"; } 
-     
+ 
      delete $cache{1};    # DELETE
      %cache = ();         # CLEAR
 
@@ -48,7 +56,7 @@ DESCRIPTION
 
     The implementation is a hash, for quick lookups, overlaying a doubly
     linked list for quick insertion and deletion. On a WinNT PII 300, writes
-    to the hash were done at a rate 3200 per second, and reads from the hash
+    to the hash were done at a rate 3100 per second, and reads from the hash
     at 6300 per second. Work has been done to optimize refreshing cache
     entries that are frequently read from, code like $cache{entry}, which
     moves the entry to the end of the linked list internally.
@@ -64,6 +72,24 @@ INSTALLATION
 
             * use nmake for win32
             ** you can also just copy Cache.pm to $perllib/Tie
+
+BENCMARKS
+    There is another simpler LRU cache implementation in CPAN,
+    Tie::Cache::LRU, which has the same basic size limiting functionality,
+    and for this functionality, the exact same interface. This other cache
+    takes writes about 20% faster but cache reads are about 50% slower. Here
+    are some numbers to illustrate:
+
+     Module                 Read/s  Write/s Delete/s Platform
+     ------                 ------  ------- -------- --------
+     Tie::Cache v.08         6300   3100    4800     perl 5.00404 WinNT PII300
+     Tie::Cache::LRU v.05    3700   3700    4500     perl 5.00404 WinNT PII300
+     --
+     Tie::Cache v.08        10600   5300    8500     perl 5.00503 Solaris PII300
+
+    The reason for using an cache is that you are probably doing more reads
+    than writes, so you will likely want to use this module, but may want to
+    consider Tie::Cache::LRU if your i/o mix is write heavy.
 
 TRUE CACHE
     To use class as a true cache, which acts as the sole interface for some
@@ -128,7 +154,10 @@ AUTHOR
     chamas@alumni.stanford.org
 
 COPYRIGHT
-    Copyright (c) 1999 Joshua Chamas. All rights reserved. This program is
-    free software; you can redistribute it and/or modify it under the same
-    terms as Perl itself.
+    Copyright (c) 1999-2001 Joshua Chamas, Chamas Enterprises Inc.
+
+    All rights reserved. This program is free software; you can redistribute
+    it and/or modify it under the same terms as Perl itself.
+
+    Sponsored by development on NodeWorks http://www.nodeworks.com
 

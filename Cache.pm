@@ -2,10 +2,23 @@
 
 package Tie::Cache;
 use strict;
-use vars qw($VERSION $Debug);
+use vars qw(
+ $VERSION $Debug $STRUCT_SIZE $REF_SIZE
+ $BEFORE $AFTER $KEY $VALUE $BYTES $DIRTY
+);
 
-$VERSION = .10;
+$VERSION = .11;
 $Debug = 0; # set to 1 for summary, 2 for debug output
+$STRUCT_SIZE = 240; # per cached elem bytes overhead, approximate
+$REF_SIZE    = 16;
+
+# NODE ARRAY STRUCT
+$KEY    = 0;
+$VALUE  = 1;
+$BYTES  = 2;
+$BEFORE = 3;
+$AFTER  = 4;
+$DIRTY  = 5;
 
 =pod
 
@@ -17,7 +30,7 @@ Tie::Cache - LRU Cache in Memory
 
  use Tie::Cache;
  tie %cache, 'Tie::Cache', 100, { Debug => 1 };   
- tie %cache2, 'Tie::Cache', { MaxCount => 100, MaxBytes => 1000 };
+ tie %cache2, 'Tie::Cache', { MaxCount => 100, MaxBytes => 50000 };
  tie %cache3, 'Tie::Cache', 100, { Debug => 1 , WriteSync => 0};   
 
  # Options ##################################################################
@@ -27,10 +40,18 @@ Tie::Cache - LRU Cache in Memory
  #		 2 - prints detailed debugging info
  #
  # MaxCount =>	 Maximum entries in cache.
- # MaxBytes =>   Maximum bytes in cache, sum of keys and values.
+ #
+ # MaxBytes =>   Maximum bytes taken in memory for cache based on approximate 
+ #               size of total cache structure in memory
+ #
+ #               There is approximately 240 bytes used per key/value pair in the cache for 
+ #               the cache data structures, so a cache of 5000 entries would take
+ #               at approximately 1.2M plus the size of the data being cached.
+ #
  # MaxSize  =>   Maximum size of each cache entry. Larger entries are not cached.
  #                   This helps prevent much of the cache being flushed when 
- #                   you set an exceptionally large entry.
+ #                   you set an exceptionally large entry.  Defaults to MaxBytes/10
+ #
  # WriteSync =>  1 - DEFAULT, write() when data is dirtied for 
  #                   TRUE CACHE (see below)
  #               0 - write() dirty data as late as possible, when leaving 
@@ -85,7 +106,7 @@ sub TIEHASH {
 
     my $sync = exists($options->{WriteSync}) ? $options->{WriteSync} : 1;
 
-    bless { 
+    my $self = bless { 
 	   # how many items to cache
 	   max_count=> $max_count, 
 	   
@@ -93,7 +114,7 @@ sub TIEHASH {
 	   max_bytes => $options->{MaxBytes},
 	   
 	   # max size (in bytes) of an individual cache entry
-	   max_size => $options->{MaxSize} || $options->{MaxBytes},
+	   max_size => $options->{MaxSize} || (int($options->{MaxBytes}/10) + 1),
 	   
 	   # current sizes
 	   count=>0, 
@@ -115,6 +136,12 @@ sub TIEHASH {
 	   
 	
     }, $class;
+
+    if (($self->{max_bytes} && ! $self->{max_size})) {
+	die("MaxSize must be defined when MaxBytes is");
+    }
+
+    $self;
 }
 
 # override to write data leaving cache
@@ -141,20 +168,20 @@ sub FETCH {
 	$self->{hit}++; # if $self->{dbg};
 
 	# we used to call delete then insert, but we streamlined code
-	if(my $after = $node->{after}) {
+	if(my $after = $node->[$AFTER]) {
 	    $self->{dbg} > 1 and $self->print("update() node $node to tail of list");
 	    # reconnect the nodes
-	    my $before = $after->{before} = $node->{before};
+	    my $before = $after->[$BEFORE] = $node->[$BEFORE];
 	    if($before) {
-		$before->{after} = $after;
+		$before->[$AFTER] = $after;
 	    } else {
 		$self->{head} = $after;
 	    }
 
 	    # place at the end
-	    $self->{tail}{after} = $node;
-	    $node->{before} = $self->{tail};
-	    $node->{after} = undef;
+	    $self->{tail}[$AFTER] = $node;
+	    $node->[$BEFORE] = $self->{tail};
+	    $node->[$AFTER] = undef;
 	    $self->{tail} = $node; # always true after this
 	} else {
 	    # if there is nothing after node, then we are at the end already
@@ -163,8 +190,8 @@ sub FETCH {
 		unless($self->{tail} eq $node);
 	}
 
-	$self->print("FETCH [$key, $node->{value}]") if ($self->{dbg} > 1);
-	$node->{value};
+	$self->print("FETCH [$key, $node->[$VALUE]]") if ($self->{dbg} > 1);
+	$node->[$VALUE];
     } else {
 	# we have a cache miss here
 	$self->{miss}++; # if $self->{dbg};
@@ -178,16 +205,17 @@ sub FETCH {
 	my $value = $self->read($key);
 
 	if(defined $value) {
+	    my $length = 0;
 	    if(defined $self->{max_size}) {
 		# check max size of entry, that it not exceed max size
-		my $length = length($value) + length($key);
+		$length = &_get_data_length(\$key, \$value);
 		if($length > $self->{max_size}) {
 		    $self->print("direct read() [$key, $value]") if ($self->{dbg} > 1);
 		    return $value;
 		}
-	    } 
+	    }
 	    # if we get here, we should insert the new node
-	    $node = &create_node($self, \$key, \$value);
+	    $node = &create_node($self, \$key, \$value, $length);
 	    &insert($self, $node);
 	    $value;
 	} else {
@@ -202,25 +230,36 @@ sub STORE {
 
     $self->print("STORE [$key,$value]") if ($self->{dbg} > 1);
 
-    # check max size of entry, that it not exceed max size
-    my $length = length($value) + length($key);
-    if(defined($self->{max_size}) and ($length > $self->{max_size})) {
-	$self->print("direct write() [$key, $value]") if ($self->{dbg} > 1);
-        $self->write($key, $value);	
-	return $value;
-    }
-
-   # do not cache undefined values
+    # do not cache undefined values
     defined($value) || return(undef);
+
+    # check max size of entry, that it not exceed max size
+    my $length;
+    if(defined($self->{max_size})) {
+	$length = &_get_data_length(\$key, \$value);
+	if($length > $self->{max_size}) {
+	    $self->print("direct write() [$key, $value]") if ($self->{dbg} > 1);
+	    $self->write($key, $value);	
+	    return $value;
+	}
+    }
 
     # do we have node already ?
     if($self->{nodes}{$key}) {
 	$node = &delete($self, $key);
-	$node->{value} = $value;
-    } 
-    
+
+	## DON'T REUSE NOW, BETTER LENGTH REUSE
+#	$node->{value} = $value;
+	# update node bytes
+#	if ($self->{max_size}) {
+#	    $node->{bytes} = &_get_data_length(\$key, \$value);
+#	}
+
+    }
+
     # insert new node  
-    $node ||= &create_node($self, \$key, \$value, $length);
+    $node = &create_node($self, \$key, \$value, $length);
+#    $node ||= &create_node($self, \$key, \$value, $length);
     &insert($self, $node);
 
     # if the data is sync'd call write now, otherwise defer the data
@@ -229,8 +268,8 @@ sub STORE {
 	$self->print("sync write() [$key, $value]") if $self->{dbg} > 1;
 	$self->write($key, $value);
     } else {
-	$node->{dirty} = 1;
-    }    
+	$node->[$DIRTY] = 1;
+    }
 
     $value;
 }
@@ -240,7 +279,7 @@ sub DELETE {
     
     $self->print("DELETE $key") if ($self->{dbg} > 1);
     my $node = $self->delete($key);
-    my $value = $node->{value};
+    my $value = $node->[$VALUE];
     undef $node;
 
     $value;
@@ -252,10 +291,10 @@ sub CLEAR {
     $self->print("CLEAR CACHE") if ($self->{dbg} > 1);
     my $node;
     while($node = $self->{head}) {
-	$self->delete($self->{head}{key});
-	if($node->{dirty}) {
-	    $self->print("dirty write() [$node->{key}, $node->{value}]") if ($self->{dbg} > 1);
-	    $self->write($node->{key}, $node->{value});
+	$self->delete($self->{head}[$KEY]);
+	if($node->[$DIRTY]) {
+	    $self->print("dirty write() [$node->[$KEY], $node->[$VALUE]]") if ($self->{dbg} > 1);
+	    $self->write($node->[$KEY], $node->[$VALUE]);
 	}
     }
 
@@ -280,10 +319,10 @@ sub FIRSTKEY {
     $self->{'keys'} = [];
     my $node = $self->{head};
     while($node) {
-	push(@{$self->{'keys'}}, $node->{key});
-	$node = $node->{after};
+	push(@{$self->{'keys'}}, $node->[$KEY]);
+	$node = $node->[$AFTER];
     }
-	
+
     shift @{$self->{'keys'}};
 }
 
@@ -321,30 +360,75 @@ sub DESTROY {
 sub create_node {
     my($self, $key, $value, $length) = @_;
     (defined($$key) && defined($$value)) 
-	|| die("need more localized data than $$key and $$value");
-    {
-	key=>$$key, 
-	value=>$$value, 
-	bytes=> defined $length ? $length : length($$key)+length($$value),
-    };
+      || die("need more localized data than $$key and $$value");
+    
+    # max_size always defined when max_bytes is
+    if (($self->{max_size})) {
+	$length = defined $length ? $length : &_get_data_length($key, $value)
+    } else {
+	$length = 0;
+    }
+    
+    # ORDER SPECIFIC, see top for NODE ARRAY STRUCT
+    my $node = [ $$key, $$value, $length ];
+}
+
+sub _get_data_length {
+    my($key, $value) = @_;
+    my $length = 0;
+    my %refs;
+
+    my @data = ($$key, $$value);
+    while(my $elem = shift @data) {
+	next if $refs{$elem};
+	$refs{$elem} = 1;
+	if(ref $elem && $elem =~ /(SCALAR|HASH|ARRAY)/) {
+	    my $type = $1;
+	    $length += $REF_SIZE; # guess, 16 bytes per ref, probably more
+	    if (($type eq 'SCALAR')) {
+		$length += length($$elem);
+	    } elsif (($type eq 'HASH')) {
+		while (my($k,$v) = each %$elem) {
+		    for my $kv($k,$v) {
+			if ((ref $kv)) {
+			    push(@data, $kv);
+			} else {
+			    $length += length($kv);
+			}
+		    }
+		}
+	    } elsif (($type eq 'ARRAY')) {
+		for my $val (@$elem){
+		    if ((ref $val)) {
+			push(@data, $val);
+		    } else {
+			$length += length($val);
+		    }
+		}
+	    }
+	} else {
+	    $length += length($elem);
+	}
+    }
+
+    $length;
 }
 
 sub insert {
     my($self, $new_node) = @_;
     
-    $new_node->{after} = 0;
-    $new_node->{before} = $self->{tail};
-    $self->print("insert() [$new_node->{key}, $new_node->{value}]") if ($self->{dbg} > 1);
+    $new_node->[$AFTER] = 0;
+    $new_node->[$BEFORE] = $self->{tail};
+    $self->print("insert() [$new_node->[$KEY], $new_node->[$VALUE]]") if ($self->{dbg} > 1);
     
-#    my $key = $new_node->{key};
-    $self->{nodes}{$new_node->{key}} = $new_node;
+    $self->{nodes}{$new_node->[$KEY]} = $new_node;
 
     # current sizes
     $self->{count}++;
-    $self->{bytes} += $new_node->{bytes};
+    $self->{bytes} += $new_node->[$BYTES] + $STRUCT_SIZE;
 
     if($self->{tail}) {
-	$self->{tail}{after} = $new_node;
+	$self->{tail}[$AFTER] = $new_node;
     } else {
 	$self->{head} = $new_node;
     }
@@ -360,11 +444,11 @@ sub insert {
 			 "count ($self->{count}/$self->{max_count}) "
 			 );
 	}
-	my $old_node = $self->delete($self->{head}{key});
-	if($old_node->{dirty}) {
-	    $self->print("dirty write() [$old_node->{key}, $old_node->{value}]") 
-		if ($self->{dbg} > 1);
-	    $self->write($old_node->{key}, $old_node->{value});
+	my $old_node = $self->delete($self->{head}[$KEY]);
+	if($old_node->[$DIRTY]) {
+	    $self->print("dirty write() [$old_node->[$KEY], $old_node->[$VALUE]]") 
+	      if ($self->{dbg} > 1);
+	    $self->write($old_node->[$KEY], $old_node->[$VALUE]);
 	}
 #	if($self->{dbg} > 1) {
 #	    $self->print("after delete - bytes $self->{bytes}; count $self->{count}");
@@ -379,26 +463,26 @@ sub delete {
     my $node = $self->{nodes}{$key} || return;
 #    return unless $node;
 
-    $self->print("delete() [$key, $node->{value}]") if ($self->{dbg} > 1);
+    $self->print("delete() [$key, $node->[$VALUE]]") if ($self->{dbg} > 1);
 
-    my $before = $node->{before};
-    my $after = $node->{after};
+    my $before = $node->[$BEFORE];
+    my $after = $node->[$AFTER];
 
-#    my($before, $after) = $node->{before,after};
+    #    my($before, $after) = $node->{before,after};
     if($before) {
-	($before->{after} = $after);
+	($before->[$AFTER] = $after);
     } else {
 	$self->{head} = $after;
     }
 
     if($after) {
-	($after->{before} = $before);
+	($after->[$BEFORE] = $before);
     } else {
 	$self->{tail} = $before;
     }
 
     delete $self->{nodes}{$key};
-    $self->{bytes} -= $node->{bytes};
+    $self->{bytes} -= ($node->[$BYTES] + $STRUCT_SIZE);
     $self->{count}--;
     
     $node;
@@ -429,15 +513,15 @@ sub pretty_chains {
     $str .= "[head]->";
     my($curr_node) = $self->{head};
     while($curr_node) {
-	$str .= "[$curr_node->{key},$curr_node->{value}]->";
-	$curr_node = $curr_node->{after};
+	$str .= "[$curr_node->[$KEY],$curr_node->[$VALUE]]->";
+	$curr_node = $curr_node->[$AFTER];
     }
     $str .= "[tail]->";
 
     $curr_node = $self->{tail};
     while($curr_node) {
-	$str .= "[$curr_node->{key},$curr_node->{value}]->";
-	$curr_node = $curr_node->{before};
+	$str .= "[$curr_node->[$KEY],$curr_node->[$VALUE]]->";
+	$curr_node = $curr_node->[$BEFORE];
     }
     $str .= "[head]";
 
@@ -551,9 +635,18 @@ at chamas@alumni.stanford.org
 
 =head1 COPYRIGHT
 
-Copyright (c) 1999 Joshua Chamas.
+Copyright (c) 1999-2001 Joshua Chamas, Chamas Enterprises Inc.  
+
 All rights reserved. This program is free software; 
 you can redistribute it and/or modify it under the same 
 terms as Perl itself. 
 
+Sponsored by development on NodeWorks http://www.nodeworks.com
+
 =cut
+
+
+
+
+
+

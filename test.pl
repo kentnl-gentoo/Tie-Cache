@@ -20,7 +20,12 @@ sub test {
     print "$result ... $desc\n";
 }
 
-tie %cache, 'Tie::Cache', $Size, { MaxSize => 1000 };
+tie %cache, 'Tie::Cache', { 
+			   Debug => 0, 
+			   MaxCount => $Size, 
+			   MaxSize => 1000, 
+			   MaxBytes => 5000000 
+			  };
 my %normal;
 
 print "++++ Benchmarking operations on Tie::Cache of size $Size\n\n";
@@ -68,10 +73,18 @@ report(
 
 my $over = $Size * 2;
 $i = 0;
+%cache = ();
 report(
        "$over inserts overflowing Tie::Cache %hash ", 
        $over,
        sub { $cache{++$i} = $i; }
+       );
+
+$i = 0;
+report(
+       "$over reads from overflowed cache",
+       $over,
+       sub { $cache{++$i} }
        );
 
 report(
