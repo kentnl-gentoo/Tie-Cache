@@ -1,3 +1,14 @@
+$MODULE = "Tie::Cache"; $VERSION = .06; $DATE = 2/16/99;
+
++ WriteSynch config option for TRUE CACHE.  WriteSynch => 0 
+  will have the dirty data be written back as late as possible.  
+  WriteSynch => 1 is immediate write-through for data dirtied.
+- STORE returns value stored; $cache{$key} = $value returns $value now
++ decomped FETCH better so it doesn't use STORE internally
+  necessary for new WriteSynch functionality
++ WriteSynch => 0 config set in test.pl to demostrate use.
++ Optimizations, especially for refreshing entries in cache on FETCH
+
 $MODULE = "Tie::Cache"; $VERSION = .05;
 
 + Keep track of hits / misses even without debug option set.

@@ -11,17 +11,23 @@ Tie::Cache - LRU Cache in Memory
  use Tie::Cache;
  tie %cache, 'Tie::Cache', 100, { Debug => 1 };   
  tie %cache2, 'Tie::Cache', { MaxCount => 100, MaxBytes => 1000 };
+ tie %cache3, 'Tie::Cache', 100, { Debug => 1 , WriteSync => 0};   
 
- # Options #####################################################
+ # Options ##################################################################
  #
- # Debug =>	0 - DEFAULT, no debugging output
- #		1 - prints cache statistics upon destroying
- #		2 - prints detailed debugging info
+ # Debug =>	 0 - DEFAULT, no debugging output
+ #		 1 - prints cache statistics upon destroying
+ #		 2 - prints detailed debugging info
  #
- # MaxCount =>	Maximum entries in cache.
- # MaxBytes =>  Maximum bytes in cache, sum of keys and values.
+ # MaxCount =>	 Maximum entries in cache.
+ # MaxBytes =>   Maximum bytes in cache, sum of keys and values.
  #
- ################################################################
+ # WriteSync => 1 - DEFAULT, write() when data is dirtied for 
+ #                   TRUE CACHE (see below)
+ #               0 - write() dirty data as late as possible, when leaving 
+ #                   cache, or when cache is being DESTROY'd
+ #
+ ############################################################################
 
  # cache supports normal tied hash functions
  $cache{1} = 2;       # STORE
@@ -49,13 +55,17 @@ majority of the time.
 The implementation is a hash, for quick lookups, 
 overlaying a doubly linked list for quick insertion and deletion.
 On a PII 300, writes to the hash were done at a rate of at 
-least 3000 per second.
+least 3000 per second.  Work has been done to optimize refreshing 
+cache entries that are frequently read from, code like $cache{entry}, 
+which moves the entry to the end of the linked list internally.
 
 =cut Documentation continues at the end of the module.
 
 package Tie::Cache;
-$VERSION = .05;
-$Tie::Cache::Debug = 0; # set to 1 for summary, 2 for debug output
+use vars qw($VERSION $Debug);
+
+$VERSION = .06;
+$Debug = 0; # set to 1 for summary, 2 for debug output
 
 sub TIEHASH {
     my($class, $max_size, $options) = @_;
@@ -72,6 +82,7 @@ sub TIEHASH {
 
     $Debug ||= $options->{Debug};
     $Debug ||= 0;
+    my $sync = exists($options->{WriteSync}) ? $options->{WriteSync} : 1;
 
     bless { 
 	# how many items to cache
@@ -92,23 +103,28 @@ sub TIEHASH {
 
 	# statistics
 	hit => 0,
-	miss => 0
+	miss => 0,
 
+	# config
+	sync => $sync,
+	
     }, $class;
 }
 
 # override to write data leaving cache
-sub write {
-    my($self, $key, $value) = @_;
-    1;
-}
+sub write { undef; }
+# commented this section out for speed
+#    my($self, $key, $value) = @_;
+#    1;
+#}
 
 # override to get data if not in cache, should return $value
 # associated with $key
-sub read {
-    my($self, $key) = @_;
-    undef;
-}
+sub read { undef; }
+# commented this section out for speed
+#    my($self, $key) = @_;
+#    undef;
+#}
 
 sub FETCH {
     my($self, $key) = @_;
@@ -117,31 +133,56 @@ sub FETCH {
     if($node) {
 	# refresh node's entry
 	$self->{hit} += 1; # if $Debug;
-	$self->delete($node->{key});
-	$self->insert($node);
+
+	# we used to call delete then insert, but we streamlined code
+	if($node->{after}) {
+	    $self->print("update() node $node to tail of list") if ($Debug > 1);
+	    # reconnect the nodes
+	    ($node->{after}{before} = $node->{before});
+	    if($node->{before}) {
+		($node->{before}{after} = $node->{after});
+	    } else {
+		$self->{head} = $node->{after};
+	    }
+
+	    # place at the end
+	    $self->{tail}{after} = $node;
+	    $node->{before} = $self->{tail};
+	    $node->{after} = undef;
+	    $self->{tail} = $node; # always true after this
+	} else {
+	    # if there is nothing after node, then we are at the end already
+	    # so don't do anything to move the nodes around
+	    die("this node is the tail, so something's wrong") 
+		unless($self->{tail} eq $node);
+	}
+
+	$self->print("FETCH [$key, $node->{value}]") if ($Debug > 1);
+	$node->{value};
     } else {
 	# we have a cache miss here
 	$self->{miss} += 1; # if $Debug;
+
+	# its fine to always insert a node, even when we have an undef,
+	# because even if we aren't a sub-class, we should assume use
+	# that would then set the entry.  This model works well with
+	# sub-classing and reads() that might want to return undef as
+	# a valid value.
 	$self->print("read() for key $key") if $Debug > 1;
-	$value = $self->read($key);
+	my $value = $self->read($key);
 	if(defined $value) {
-	    $node = $self->STORE($key, $value);
+	    $node = $self->create_node(\$key, \$value);
+	    $self->insert($node);
 	}
-    }
-    
-    if($node) {
-	$self->print("FETCH [$key, $node->{value}]")
-	    if ($Debug > 1);
-	$node->{value};
-    } else {
-	$self->print("FETCH nothing") if $Debug > 1;
-	undef;
+	$value;
     }
 }
 
 sub STORE {
     my($self, $key, $value) = @_;
     my $node;
+
+    $self->print("STORE [$key,$value]") if ($Debug > 1);
 
     # do we have node already ?
     if($self->{nodes}{$key}) {
@@ -150,13 +191,19 @@ sub STORE {
     } 
     
     # insert new node  
-    $node ||= {key=>$key, value=>$value, bytes=> length($key)+length($value)};
+    $node ||= $self->create_node(\$key, \$value);
     $self->insert($node);
 
-    $self->print("STORE [$key,$value]")
-	if ($Debug > 1);
+    # if the data is sync'd call write now, otherwise defer the data
+    # writing, but mark it dirty so it can be cleanup up at the end
+    if($self->{sync}) {
+	$self->print("sync write() [$key, $value]") if $Debug > 1;
+	$self->write($key, $value);
+    } else {
+	$node->{dirty} = 1;
+    }    
 
-    $node;
+    $node->{value};
 }
 
 sub DELETE {
@@ -177,8 +224,10 @@ sub CLEAR {
     my $node;
     while($node = $self->{head}) {
 	$self->delete($self->{head}{key});
-	$self->print("write() [$node->{key}, $node->{value}]") if ($Debug > 1);
-	$self->write($node->{key}, $node->{value});
+	if($node->{dirty}) {
+	    $self->print("dirty write() [$node->{key}, $node->{value}]") if ($Debug > 1);
+	    $self->write($node->{key}, $node->{value});
+	}
     }
 
     1;
@@ -224,6 +273,9 @@ sub DESTROY {
 		sprintf("%4.3f", $self->{hit} / ($self->{hit} + $self->{miss})); 
 	}
 	$self->print($self->pretty_self());
+	if($Debug > 1) {
+	    $self->print($self->pretty_chains());
+	}
     }
     
     $self->print("DESTROYING") if $Debug > 1;
@@ -236,14 +288,26 @@ sub DESTROY {
 ## Helper Routines
 ####PERL##LRU##TIE##CACHE##PERL##LRU##TIE##CACHE##PERL##LRU##TIE##CACHE
 
+# we build a node from locally scoped variables so we don't have to 
+# copy a lot of data in and out of this helper routine
+sub create_node {
+    my($self, $key, $value) = @_;
+    (defined($$key) && defined($$value)) 
+	|| die("need more localized data than $key and $value");
+    {
+	key=>$$key, 
+	value=>$$value, 
+	bytes=> length($$key)+length($$value),
+    };
+}
+
 sub insert {
     my($self, $new_node) = @_;
     
     $new_node->{after} = 0;
     $new_node->{before} = $self->{tail};
-
-#    $self->print("inserting node: [$new_node->{key}, $new_node->{value}]")
-#	if ($Debug > 1);
+    $self->print("insert() [$new_node->{key}, $new_node->{value}]") if ($Debug > 1);
+    
     my $key = $new_node->{key};
     $self->{nodes}{$key} = $new_node;
 
@@ -269,9 +333,11 @@ sub insert {
 			 );
 	}
 	my $old_node = $self->delete($self->{head}{key});
-	$self->print("write() [$old_node->{key}, $old_node->{value}]") 
-	    if ($Debug > 1);
-	$self->write($old_node->{key}, $old_node->{value});
+	if($old_node->{dirty}) {
+	    $self->print("dirty write() [$old_node->{key}, $old_node->{value}]") 
+		if ($Debug > 1);
+	    $self->write($old_node->{key}, $old_node->{value});
+	}
 #	if($Debug > 1) {
 #	    $self->print("after delete - bytes $self->{bytes}; count $self->{count}");
 #	}
@@ -285,6 +351,8 @@ sub delete {
     
     my($node) = $self->{nodes}{$key};
     return unless $node;
+
+    $self->print("delete() [$key, $node->{value}]") if ($Debug > 1);
 
     if($node->{before}) {
 	($node->{before}{after} = $node->{after});
@@ -302,9 +370,6 @@ sub delete {
     $self->{bytes} -= $node->{bytes};
     $self->{count}--;
     
-    $self->print("delete() $key: $node->{value}") 
-	if ($Debug > 1);
-
     $node;
 }
 
@@ -371,8 +436,14 @@ To use class as a true cache, which acts as the sole interface
 for some data set, subclass the real cache off Tie::Cache, 
 with @ISA = qw( 'Tie::Cache' ) notation.  Then override
 the read() method for behavior when there is a cache miss,
-and the write() method for behavior when the cache's old data
-is removed from the cache, often called write through.
+and the write() method for behavior when the cache's data 
+changes.
+
+When WriteSync is 1 or TRUE (DEFAULT), write() is called immediately
+when data in the cache is modified.  If set to 0, data that has 
+been modified in the cache gets written out when the entries are deleted or
+during the DESTROY phase of the cache object, usually at the end of
+a script.
 
 =head1 TRUE CACHE EXAMPLE
 
@@ -428,7 +499,7 @@ at chamas@alumni.stanford.org
 
 =head1 COPYRIGHT
 
-Copyright (c) 1998 Joshua Chamas.
+Copyright (c) 1999 Joshua Chamas.
 All rights reserved. This program is free software; 
 you can redistribute it and/or modify it under the same 
 terms as Perl itself. 
