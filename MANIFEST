@@ -1,0 +1,9 @@
+CHANGES
+Cache.pm
+MANIFEST
+MANIFEST.SKIP
+MANIFEST.bak
+Makefile.PL
+README
+bench.pl
+test.pl

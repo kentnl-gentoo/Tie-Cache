@@ -25,7 +25,9 @@ tie %cache, 'Tie::Cache', {
 			   Debug => 0, 
 			   MaxCount => $Size, 
 			   MaxSize => 1000, 
-			   MaxBytes => 5000000 
+			   MaxBytes => 5000000,
+#			   WriteSync => 0,
+#			   Debug => 2,
 			  };
 
 tie %count_cache, 'Tie::Cache', $Size;
@@ -135,59 +137,63 @@ my $obj = tied(%cache);
 print join("\n", map { "$_:\t$obj->{$_}" } 'count', 'hit', 'miss', 'bytes');
 print "\n";
 
-exit;
-
 # personalize the Tie::Cache object, by inheriting from it
 package My::Cache;
 use vars qw(@ISA);
 @ISA = qw(Tie::Cache);
 
+my($read_count, $write_count) = (0,0);
 # override the read() and write() member functions
 # these tell the cache what to do with a cache miss or flush
 sub read { 
     my($self, $key) = @_; 
 #    print "cache miss for $key, read() data\n";
+    $read_count++;
     rand() * $key; 
 }
 sub write { 
     my($self, $key, $value) = @_;
+    $write_count++;
 #    print "flushing [$key, $value] from cache, write() data\n";
 }
 
-my $cache_size   = $ARGV[0] || 2;
-my $num_to_cache = $ARGV[1] || 4;   
-my $debug = $ARGV[2] || 2;
+print "\n++++ Testing TRUE CACHE ++++\n\n";
+
+my $cache_size   = 100;
 my %cache;
 
 tie %cache, 'My::Cache', {
-    MaxBytes => $cache_size * 20,
+    MaxBytes => $cache_size * 1000,
     MaxCount => $cache_size,
-    Debug => $debug,
+    Debug => 0,
     WriteSync => 0,
-    };   
+    };
 
 # load the cache with new data, each through its contents,
 # and then reload in reverse order.
+&main::test("read count == 0 pre reads", sub { $read_count == 0 });
 my $count = 0;
-for(1..$num_to_cache) { 
+for(1..$cache_size) { 
     my $value = $cache{$_};
-    print "READ data $_: $value\n";
-    if($count++ % 2) {
-	print "INCREMENTING data for $_\n";
-	$cache{$_} = $value + 1;
-    }
 }
+&main::test("read count == $cache_size post reads", sub { $read_count == $cache_size });
 
-for(1..$num_to_cache) {
+for(1..$cache_size) {
     my $new_value = int(rand() * 10);
-    print "WRITING data $new_value\n";
     $cache{$_} = $new_value;
 }
 
-while(my($k, $v) = each %cache) { print "EACH data $k: $v\n"; }
-#while(my($k, $v) = each %cache) { print "EACH data $k: $v\n"; }
-#for(my $i=$num_to_cache; $i>0; $i--) { print "read data $i: $cache{$i}\n"; }
+&main::test("write count == 0 pre flush()", sub { $write_count == 0 });
+tied(%cache)->flush();
+&main::test("write count == $cache_size post flush()", sub { $write_count == $cache_size });
 
-# clear cache in 2 ways, write will flush out to disk
 %cache = ();
+
+&main::test("write count == $cache_size post CLEAR()", sub { $write_count == $cache_size });
+
 undef %cache;
+
+print "\n";
+
+exit;
+

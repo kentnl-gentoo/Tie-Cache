@@ -76,20 +76,18 @@ INSTALLATION
 BENCMARKS
     There is another simpler LRU cache implementation in CPAN,
     Tie::Cache::LRU, which has the same basic size limiting functionality,
-    and for this functionality, the exact same interface. This other cache
-    takes writes about 20% faster but cache reads are about 50% slower. Here
-    are some numbers to illustrate:
+    and for this functionality, the exact same interface.
 
-     Module                 Read/s  Write/s Delete/s Platform
-     ------                 ------  ------- -------- --------
-     Tie::Cache v.08         6300   3100    4800     perl 5.00404 WinNT PII300
-     Tie::Cache::LRU v.05    3700   3700    4500     perl 5.00404 WinNT PII300
-     --
-     Tie::Cache v.08        10600   5300    8500     perl 5.00503 Solaris PII300
+    Through healthy competition, Michael G Schwern got Tie::Cache::LRU
+    mostly faster than Tie::Cache on reads & writes:
 
-    The reason for using an cache is that you are probably doing more reads
-    than writes, so you will likely want to use this module, but may want to
-    consider Tie::Cache::LRU if your i/o mix is write heavy.
+     Cache Size 5000       Tie::Cache 0.17  Tie::Cache::LRU 0.21
+     10000 Writes             1.55 CPU sec          1.10 CPU sec
+     40000 Reads              1.82 CPU sec          1.58 CPU sec
+     10000 Deletes            0.55 CPU sec          0.59 CPU sec
+
+    Unless you are using TRUE CACHE or MaxBytes functionality, using
+    Tie::Cache::LRU should be an easy replacement for Tie::Cache.
 
 TRUE CACHE
     To use class as a true cache, which acts as the sole interface for some
@@ -103,6 +101,14 @@ TRUE CACHE
     modified in the cache gets written out when the entries are deleted or
     during the DESTROY phase of the cache object, usually at the end of a
     script.
+
+    To have the dirty data write() periodically while WriteSync is set to 0,
+    there is a flush() cache API call that will flush the dirty writes in
+    this way. Just call the flush() API like:
+
+      my $write_flush_count = tied(%cache)->flush();
+
+    The flush() API was added in the .17 release thanks to Rob Bloodgood.
 
 TRUE CACHE EXAMPLE
      use Tie::Cache;
@@ -135,6 +141,9 @@ TRUE CACHE EXAMPLE
      while(my($k, $v) = each %cache) { print "each data $k: $v\n"; }
      for(my $i=$num_to_cache; $i>0; $i--) { print "read data $i: $cache{$i}\n"; }
 
+     # flush writes now, trivial use since will happen in DESTROY() anyway
+     tied(%cache)->flush(); 
+
      # clear cache in 2 ways, write will flush out to disk
      %cache = ();
      undef %cache;
@@ -148,16 +157,16 @@ NOTES
             :) Jamie McCarthy, for trying to make Tie::Cache be all
                that it can be.
             :) Rob Fugina who knows how to "TRULY CACHE".
+            :) Rob Bloodgood, for the TRUE CACHE flush() API
 
 AUTHOR
     Please send any questions or comments to Joshua Chamas at
     chamas@alumni.stanford.org
 
 COPYRIGHT
-    Copyright (c) 1999-2001 Joshua Chamas, Chamas Enterprises Inc.
+    Copyright (c) 1999-2002 Joshua Chamas, Chamas Enterprises Inc. Sponsored
+    by development on NodeWorks http://www.nodeworks.com
 
     All rights reserved. This program is free software; you can redistribute
     it and/or modify it under the same terms as Perl itself.
-
-    Sponsored by development on NodeWorks http://www.nodeworks.com
 

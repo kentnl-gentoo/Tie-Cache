@@ -1,4 +1,10 @@
-$MODULE = "Tie::Cache"; $VERSION = .15; $DATE = 'TBA';
+$MODULE = "Tie::Cache"; $VERSION = .17; $DATE = '07/03/2002';
+
++ added tied(%cache)->flush() method to sync dirty writes
+  that have been cache with WriteSync => 0 config for a true
+  cache inherited object.  Added testing to cover in test.pl
+
+$MODULE = "Tie::Cache"; $VERSION = .15; $DATE = '03/20/2001';
 
 + Better test.pl timing output, also differentiate between
   cache with MaxBytes setting and one with just MaxCount,

@@ -7,7 +7,7 @@ use vars qw(
  $BEFORE $AFTER $KEY $VALUE $BYTES $DIRTY
 );
 
-$VERSION = .15;
+$VERSION = .17;
 $Debug = 0; # set to 1 for summary, 2 for debug output
 $STRUCT_SIZE = 240; # per cached elem bytes overhead, approximate
 $REF_SIZE    = 16;
@@ -301,16 +301,15 @@ sub CLEAR {
     my($self) = @_;
 
     $self->print("CLEAR CACHE") if ($self->{dbg} > 1);
+
+    if($self->{subclass}) {
+	my $flushed = $self->flush();
+	$self->print("FLUSH COUNT $flushed") if ($self->{dbg} > 1);
+    }
+
     my $node;
     while($node = $self->{head}) {
 	$self->delete($self->{head}[$KEY]);
-	if ($self->{subclass}) {
-	    if($node->[$DIRTY]) {
-		$self->print("dirty write() [$node->[$KEY], $node->[$VALUE]]") 
-		  if ($self->{dbg} > 1);
-		$self->write($node->[$KEY], $node->[$VALUE]);
-	    }
-	}
     }
 
     1;
@@ -505,6 +504,27 @@ sub delete {
     $node;
 }
 
+sub flush {
+    my $self = shift;
+
+    $self->print("FLUSH CACHE") if ($self->{dbg} > 1);
+
+    my $node = $self->{head};
+    my $flush_count = 0;
+    while($node) {
+	if($node->[$DIRTY]) {
+	    $self->print("flush dirty write() [$node->[$KEY], $node->[$VALUE]]") 
+	      if ($self->{dbg} > 1);
+	    $self->write($node->[$KEY], $node->[$VALUE]);
+	    $node->[$DIRTY] = 0;
+	    $flush_count++;
+	}
+	$node = $node->[$AFTER];
+    }
+
+    $flush_count;
+}
+
 sub print {
     my($self, $msg) = @_;
     print "$self: $msg\n";
@@ -564,23 +584,21 @@ shown below.  Otherwise, just copy Cache.pm to $PERLLIB/site/Tie
 
 =head1 BENCMARKS
 
-There is another simpler LRU cache implementation in CPAN, 
+There is another simpler LRU cache implementation in CPAN,
 Tie::Cache::LRU, which has the same basic size limiting 
 functionality, and for this functionality, the exact same 
-interface.  This other cache takes writes about 20% faster 
-but cache reads are about 50% slower.  Here are some numbers 
-to illustrate:
+interface.
 
- Module			Read/s	Write/s	Delete/s Platform
- ------			------	-------	-------- --------
- Tie::Cache v.08	 6300	3100	4800	 perl 5.00404 WinNT PII300
- Tie::Cache::LRU v.05	 3700	3700	4500	 perl 5.00404 WinNT PII300
- Tie::Cache v.08	10600	5300	8500	 perl 5.00503 Solaris PII300
+Through healthy competition, Michael G Schwern got 
+Tie::Cache::LRU mostly faster than Tie::Cache on reads & writes:
 
-The reason for using an cache is that you are probably
-doing more reads than writes, so you will likely want to 
-use this module, but may want to consider Tie::Cache::LRU
-if your i/o mix is write heavy.  
+ Cache Size 5000       Tie::Cache 0.17  Tie::Cache::LRU 0.21
+ 10000 Writes             1.55 CPU sec          1.10 CPU sec
+ 40000 Reads              1.82 CPU sec          1.58 CPU sec
+ 10000 Deletes            0.55 CPU sec          0.59 CPU sec
+
+Unless you are using TRUE CACHE or MaxBytes functionality,
+using Tie::Cache::LRU should be an easy replacement for Tie::Cache.
 
 =head1 TRUE CACHE
 
@@ -596,6 +614,14 @@ when data in the cache is modified.  If set to 0, data that has
 been modified in the cache gets written out when the entries are deleted or
 during the DESTROY phase of the cache object, usually at the end of
 a script.
+
+To have the dirty data write() periodically while WriteSync is set to 0,
+there is a flush() cache API call that will flush the dirty writes
+in this way.  Just call the flush() API like:
+
+  my $write_flush_count = tied(%cache)->flush();
+
+The flush() API was added in the .17 release thanks to Rob Bloodgood.
 
 =head1 TRUE CACHE EXAMPLE
 
@@ -629,6 +655,9 @@ a script.
  while(my($k, $v) = each %cache) { print "each data $k: $v\n"; }
  for(my $i=$num_to_cache; $i>0; $i--) { print "read data $i: $cache{$i}\n"; }
 
+ # flush writes now, trivial use since will happen in DESTROY() anyway
+ tied(%cache)->flush(); 
+
  # clear cache in 2 ways, write will flush out to disk
  %cache = ();
  undef %cache;
@@ -643,6 +672,7 @@ including:
 	:) Jamie McCarthy, for trying to make Tie::Cache be all
 	   that it can be.
 	:) Rob Fugina who knows how to "TRULY CACHE".
+	:) Rob Bloodgood, for the TRUE CACHE flush() API
 
 =head1 AUTHOR
 
@@ -651,13 +681,12 @@ at chamas@alumni.stanford.org
 
 =head1 COPYRIGHT
 
-Copyright (c) 1999-2001 Joshua Chamas, Chamas Enterprises Inc.  
+Copyright (c) 1999-2002 Joshua Chamas, Chamas Enterprises Inc.  
+Sponsored by development on NodeWorks http://www.nodeworks.com
 
 All rights reserved. This program is free software; 
 you can redistribute it and/or modify it under the same 
 terms as Perl itself. 
-
-Sponsored by development on NodeWorks http://www.nodeworks.com
 
 =cut
 

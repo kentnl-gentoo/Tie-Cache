@@ -1,6 +1,5 @@
 #!perl
 
-$VERSION_FROM = 'CHANGES';
 use ExtUtils::MakeMaker;
-&WriteMakefile( NAME => "Tie::Cache" );
+&WriteMakefile( NAME => "Tie::Cache", VERSION_FROM => 'CHANGES' );
 
