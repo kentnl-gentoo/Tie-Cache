@@ -7,7 +7,7 @@ use vars qw(
  $BEFORE $AFTER $KEY $VALUE $BYTES $DIRTY
 );
 
-$VERSION = .11;
+$VERSION = .15;
 $Debug = 0; # set to 1 for summary, 2 for debug output
 $STRUCT_SIZE = 240; # per cached elem bytes overhead, approximate
 $REF_SIZE    = 16;
@@ -106,39 +106,52 @@ sub TIEHASH {
 
     my $sync = exists($options->{WriteSync}) ? $options->{WriteSync} : 1;
 
-    my $self = bless { 
-	   # how many items to cache
-	   max_count=> $max_count, 
-	   
-	   # max bytes to cache
-	   max_bytes => $options->{MaxBytes},
-	   
-	   # max size (in bytes) of an individual cache entry
-	   max_size => $options->{MaxSize} || (int($options->{MaxBytes}/10) + 1),
-	   
-	   # current sizes
-	   count=>0, 
-	   bytes=>0,
-	   
-	   # inner structures
-	   head=>0, 
-	   tail=>0, 
-	   nodes=>{},
-	   'keys'=>[],
-	   
-	   # statistics
-	   hit => 0,
-	   miss => 0,
-	   
-	   # config
-	   sync => $sync,
-	   dbg => $options->{Debug} || $Debug
-	   
-	
-    }, $class;
-
+    my $self = bless 
+      { 
+       # how many items to cache
+       max_count=> $max_count, 
+       
+       # max bytes to cache
+       max_bytes => $options->{MaxBytes},
+       
+       # max size (in bytes) of an individual cache entry
+       max_size => $options->{MaxSize} || ($options->{MaxBytes} ? (int($options->{MaxBytes}/10) + 1) : 0),
+       
+       # class track, so know if overridden subs should be used
+       'class'    => $class,
+       'subclass' => $class ne 'Tie::Cache' ? 1 : 0,
+       
+       # current sizes
+       count=>0,
+       bytes=>0,
+       
+       # inner structures
+       head=>0, 
+       tail=>0, 
+       nodes=>{},
+       'keys'=>[],
+       
+       # statistics
+       hit => 0,
+       miss => 0,
+       
+       # config
+       sync => $sync,
+       dbg => $options->{Debug} || $Debug
+       
+       
+      }, $class;
+    
     if (($self->{max_bytes} && ! $self->{max_size})) {
 	die("MaxSize must be defined when MaxBytes is");
+    }
+
+    if($self->{max_bytes} and $self->{max_bytes} < 1000) {
+	die("cannot set MaxBytes to under 1000, each raw entry takes $STRUCT_SIZE bytes alone");
+    }
+
+    if($self->{max_size} && $self->{max_size} < 3) {
+	die("cannot set MaxSize to under 3 bytes, assuming error in config");
     }
 
     $self;
@@ -201,12 +214,15 @@ sub FETCH {
 	# that would then set the entry.  This model works well with
 	# sub-classing and reads() that might want to return undef as
 	# a valid value.
-	$self->print("read() for key $key") if $self->{dbg} > 1;
-	my $value = $self->read($key);
+	my $value;
+	if ($self->{subclass}) {
+	    $self->print("read() for key $key") if $self->{dbg} > 1;
+	    $value = $self->read($key);
+	}
 
 	if(defined $value) {
-	    my $length = 0;
-	    if(defined $self->{max_size}) {
+	    my $length;
+	    if($self->{max_size}) {
 		# check max size of entry, that it not exceed max size
 		$length = &_get_data_length(\$key, \$value);
 		if($length > $self->{max_size}) {
@@ -235,11 +251,13 @@ sub STORE {
 
     # check max size of entry, that it not exceed max size
     my $length;
-    if(defined($self->{max_size})) {
+    if($self->{max_size}) {
 	$length = &_get_data_length(\$key, \$value);
 	if($length > $self->{max_size}) {
-	    $self->print("direct write() [$key, $value]") if ($self->{dbg} > 1);
-	    $self->write($key, $value);	
+	    if ($self->{subclass}) {
+		$self->print("direct write() [$key, $value]") if ($self->{dbg} > 1);
+		$self->write($key, $value);
+	    }
 	    return $value;
 	}
     }
@@ -247,14 +265,9 @@ sub STORE {
     # do we have node already ?
     if($self->{nodes}{$key}) {
 	$node = &delete($self, $key);
-
-	## DON'T REUSE NOW, BETTER LENGTH REUSE
-#	$node->{value} = $value;
-	# update node bytes
-#	if ($self->{max_size}) {
-#	    $node->{bytes} = &_get_data_length(\$key, \$value);
-#	}
-
+#	$node = &delete($self, $key);
+#	$node->[$VALUE] = $value;
+#	$node->[$BYTES] = $length || &_get_data_length(\$key, \$value);
     }
 
     # insert new node  
@@ -264,11 +277,13 @@ sub STORE {
 
     # if the data is sync'd call write now, otherwise defer the data
     # writing, but mark it dirty so it can be cleanup up at the end
-    if($self->{sync}) {
-	$self->print("sync write() [$key, $value]") if $self->{dbg} > 1;
-	$self->write($key, $value);
-    } else {
-	$node->[$DIRTY] = 1;
+    if ($self->{subclass}) {
+	if($self->{sync}) {
+	    $self->print("sync write() [$key, $value]") if $self->{dbg} > 1;
+	    $self->write($key, $value);
+	} else {
+	    $node->[$DIRTY] = 1;
+	}
     }
 
     $value;
@@ -276,13 +291,10 @@ sub STORE {
 
 sub DELETE {
     my($self, $key) = @_;
-    
+
     $self->print("DELETE $key") if ($self->{dbg} > 1);
     my $node = $self->delete($key);
-    my $value = $node->[$VALUE];
-    undef $node;
-
-    $value;
+    $node ? $node->[$VALUE] : undef;
 }
 
 sub CLEAR {
@@ -292,9 +304,12 @@ sub CLEAR {
     my $node;
     while($node = $self->{head}) {
 	$self->delete($self->{head}[$KEY]);
-	if($node->[$DIRTY]) {
-	    $self->print("dirty write() [$node->[$KEY], $node->[$VALUE]]") if ($self->{dbg} > 1);
-	    $self->write($node->[$KEY], $node->[$VALUE]);
+	if ($self->{subclass}) {
+	    if($node->[$DIRTY]) {
+		$self->print("dirty write() [$node->[$KEY], $node->[$VALUE]]") 
+		  if ($self->{dbg} > 1);
+		$self->write($node->[$KEY], $node->[$VALUE]);
+	    }
 	}
     }
 
@@ -445,10 +460,12 @@ sub insert {
 			 );
 	}
 	my $old_node = $self->delete($self->{head}[$KEY]);
-	if($old_node->[$DIRTY]) {
-	    $self->print("dirty write() [$old_node->[$KEY], $old_node->[$VALUE]]") 
-	      if ($self->{dbg} > 1);
-	    $self->write($old_node->[$KEY], $old_node->[$VALUE]);
+	if ($self->{subclass}) {
+	    if($old_node->[$DIRTY]) {
+		$self->print("dirty write() [$old_node->[$KEY], $old_node->[$VALUE]]") 
+		  if ($self->{dbg} > 1);
+		$self->write($old_node->[$KEY], $old_node->[$VALUE]);
+	    }
 	}
 #	if($self->{dbg} > 1) {
 #	    $self->print("after delete - bytes $self->{bytes}; count $self->{count}");
@@ -558,7 +575,6 @@ to illustrate:
  ------			------	-------	-------- --------
  Tie::Cache v.08	 6300	3100	4800	 perl 5.00404 WinNT PII300
  Tie::Cache::LRU v.05	 3700	3700	4500	 perl 5.00404 WinNT PII300
- --
  Tie::Cache v.08	10600	5300	8500	 perl 5.00503 Solaris PII300
 
 The reason for using an cache is that you are probably

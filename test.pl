@@ -2,16 +2,17 @@
 
 use Cache;
 use Benchmark;
-use vars qw($Size);
+use vars qw($Size %cache %count_cache);
+use strict;
 
 $Size = 5000;
 $| = 1;
 
 sub report {
     my($desc, $count, $sub) = @_;
-    print "[[ timing ]] $desc\n";
-    print timestr(timeit($count, $sub))."\n";
-    print "   ------   \n";
+    my $timed = timestr(timeit($count, $sub));
+    $timed =~ /([\d\.]+\s+cpu)/i;
+    printf("%-65.65s %s\n", "[ timing ] $desc", $1);
 }
 
 sub test {
@@ -26,75 +27,75 @@ tie %cache, 'Tie::Cache', {
 			   MaxSize => 1000, 
 			   MaxBytes => 5000000 
 			  };
+
+tie %count_cache, 'Tie::Cache', $Size;
+
+
 my %normal;
 
 print "++++ Benchmarking operations on Tie::Cache of size $Size\n\n";
 my $i = 0;
-report(
-       "insert of $Size elements into normal %hash",
-       $Size, 
+report("insert of $Size elements into normal %hash", $Size,
        sub { $normal{++$i} = $i }
       );
+$i = 0;
+report("insert of $Size elements into MaxCount Tie::Cache", $Size,
+       sub { $count_cache{++$i} = $i }
+       );
 
 $i = 0;
-report(
-       "insert of $Size elements into Tie::Cache %hash",
-       $Size,
+report("insert of $Size elements into MaxBytes Tie::Cache", $Size,
        sub { $cache{++$i} = $i }
        );
 
+
 my $rv;
 $i = 0;
-report(
-       "reading $Size elements from normal %hash",
-       $Size,
-       sub { $rv = $normal{++$i} }
-       );
+report("reading $Size elements from normal %hash", 
+       $Size, sub { $rv = $normal{++$i} } );
 $i = 0;
-report(
-       "reading $Size elements from Tie::Cache %hash",
-       $Size,
-       sub { $rv = $cache{++$i} }
-       );
+report("reading $Size elements from MaxCount Tie::Cache", 
+       $Size, sub { $rv = $count_cache{++$i} } );
+$i = 0;
+report("reading $Size elements from MaxBytes Tie::Cache", 
+       $Size, sub { $rv = $cache{++$i} } );
+
 
 $i = 0;
-report(
-       "deleting $Size elements from normal %hash",
-       $Size,
-       sub { $rv = delete $normal{++$i} }
-       );
-
+report("deleting $Size elements from normal %hash",
+       $Size, sub { $rv = delete $normal{++$i} } );
 $i = 0;
-report(
-       "deleting $Size elements from Tie::Cache %hash",
-       $Size,
-       sub { $rv = delete $cache{++$i} }
+report("deleting $Size elements from MaxCount Tie::Cache",
+       $Size, sub { $rv = delete $count_cache{++$i} }
+       );
+report("deleting $Size elements from MaxBytes Tie::Cache",
+       $Size, sub { $rv = delete $cache{++$i} }
        );
 
 my $over = $Size * 2;
 $i = 0;
 %cache = ();
 report(
-       "$over inserts overflowing Tie::Cache %hash ", 
+       "$over inserts overflowing MaxBytes Tie::Cache", 
        $over,
        sub { $cache{++$i} = $i; }
        );
 
 $i = 0;
 report(
-       "$over reads from overflowed cache",
+       "$over reads from overflowed MaxBytes Tie::Cache",
        $over,
        sub { $cache{++$i} }
        );
 
 report(
-       "$over undef inserts, not affecting Tie::Cache %hash ",
+       "$over undef inserts, not affecting MaxBytes Tie::Cache",
        $over,
        sub { $cache{rand()} = undef; }
       );
 
 report(
-       "$over undef reads, not affecting Tie::Cache %hash ",
+       "$over undef reads, not affecting MaxBytes Tie::Cache",
        $over,
        sub { $cache{rand()}; }
       );
@@ -138,6 +139,7 @@ exit;
 
 # personalize the Tie::Cache object, by inheriting from it
 package My::Cache;
+use vars qw(@ISA);
 @ISA = qw(Tie::Cache);
 
 # override the read() and write() member functions
@@ -155,6 +157,7 @@ sub write {
 my $cache_size   = $ARGV[0] || 2;
 my $num_to_cache = $ARGV[1] || 4;   
 my $debug = $ARGV[2] || 2;
+my %cache;
 
 tie %cache, 'My::Cache', {
     MaxBytes => $cache_size * 20,
@@ -167,8 +170,8 @@ tie %cache, 'My::Cache', {
 # and then reload in reverse order.
 my $count = 0;
 for(1..$num_to_cache) { 
-    print "READ data $_: $value\n";
     my $value = $cache{$_};
+    print "READ data $_: $value\n";
     if($count++ % 2) {
 	print "INCREMENTING data for $_\n";
 	$cache{$_} = $value + 1;

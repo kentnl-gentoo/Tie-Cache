@@ -1,4 +1,20 @@
-$MODULE = "Tie::Cache"; $VERSION = .11; $DATE = 'TBA';
+$MODULE = "Tie::Cache"; $VERSION = .15; $DATE = 'TBA';
+
++ Better test.pl timing output, also differentiate between
+  cache with MaxBytes setting and one with just MaxCount,
+  as MaxBytes is a bit slower for data size calculations.
+
++ Better Tie::Cache options / object config error checking,
+  die() on obvious misconfigurations that will get developers
+  in trouble.
+
+- MaxSize only set if MaxSize or MaxBytes are defined,
+  was defaulting to 1 otherwise, killing basic MaxCount config.
+
++ Optimizations for common use where Tie::Cache is not 
+  subclassed for write()/read() API
+
+$MODULE = "Tie::Cache"; $VERSION = .11; $DATE = '03/18/2001';
 
 + use of arrays for internal nodes structure instead of
   hashes for savings on memory and lookup speed.
