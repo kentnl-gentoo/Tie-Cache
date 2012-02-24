@@ -1,6 +1,6 @@
 #!/usr/local/bin/perl
 
-use Cache;
+use Tie::Cache;
 use Benchmark;
 use vars qw($Size %cache %count_cache);
 use strict;
@@ -131,6 +131,18 @@ test("first key in %cache after delete = ".($Size + 2),
 test("keys in cache after delete = ".($Size-1),
      sub { keys %cache == $Size - 1 }
      );
+
+test("array type insert/read on MaxBytes cache",
+     sub { $cache{'array'} = ["test"]; $cache{'array'}->[0] eq "test" }
+     );
+test("string type called ARRAY insert/read on MaxBytes cache",
+     sub { $cache{'array-fake'} = "ARRAY"; $cache{'array-fake'} eq "ARRAY" }
+     );
+test("hash type insert/read on MaxBytes cache",
+     sub { $cache{'array'} = { 'foo' => 'bar' }; $cache{'array'}->{'foo'} eq "bar" }
+     );
+
+exit;
 
 print "\n++++ Stats for %cache\n\n";
 my $obj = tied(%cache);

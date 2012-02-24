@@ -90,7 +90,9 @@ Work has been done to optimize refreshing cache entries that are
 frequently read from, code like $cache{entry}, which moves the 
 entry to the end of the linked list internally.
 
-=cut Documentation continues at the end of the module.
+=cut
+
+# Documentation continues at the end of the module.
 
 sub TIEHASH {
     my($class, $max_count, $options) = @_;
@@ -396,7 +398,7 @@ sub _get_data_length {
     while(my $elem = shift @data) {
 	next if $refs{$elem};
 	$refs{$elem} = 1;
-	if(ref $elem && $elem =~ /(SCALAR|HASH|ARRAY)/) {
+	if(ref $elem && ref($elem) =~ /^(SCALAR|HASH|ARRAY)$/) {
 	    my $type = $1;
 	    $length += $REF_SIZE; # guess, 16 bytes per ref, probably more
 	    if (($type eq 'SCALAR')) {
@@ -592,13 +594,15 @@ interface.
 Through healthy competition, Michael G Schwern got 
 Tie::Cache::LRU mostly faster than Tie::Cache on reads & writes:
 
- Cache Size 5000       Tie::Cache 0.17  Tie::Cache::LRU 0.21
- 10000 Writes             1.55 CPU sec          1.10 CPU sec
- 40000 Reads              1.82 CPU sec          1.58 CPU sec
- 10000 Deletes            0.55 CPU sec          0.59 CPU sec
+ Cache Size 5000       Tie::Cache 0.17  Tie::Cache::LRU 20110205.00
+ 10000 Writes             0.63 CPU sec          0.47 CPU sec
+ 40000 Reads              0.79 CPU sec          0.71 CPU sec
+ 10000 Deletes            0.23 CPU sec          0.26 CPU sec
 
 Unless you are using TRUE CACHE or MaxBytes functionality,
-using Tie::Cache::LRU should be an easy replacement for Tie::Cache.
+using Tie::Cache::LRU could be an easy replacement for Tie::Cache.
+
+OTOH one nice thing about this module is its lack of external module dependencies!
 
 =head1 TRUE CACHE
 
@@ -676,16 +680,14 @@ including:
 
 =head1 AUTHOR
 
-Please send any questions or comments to Joshua Chamas
-at chamas@alumni.stanford.org
+Please send any questions or comments to Joshua Chamas at chamas@alumni.stanford.org
 
 =head1 COPYRIGHT
 
-Copyright (c) 1999-2002 Joshua Chamas, Chamas Enterprises Inc.  
-Sponsored by development on NodeWorks http://www.nodeworks.com
+Copyright (c) 1999-2012 Joshua Chamas, Chamas Enterprises Inc.  
+Sponsored by development on NodeWorks http://nodeworks.com and Web Test.org http://web-test.org
 
-All rights reserved. This program is free software; 
-you can redistribute it and/or modify it under the same 
+All rights reserved. This program is free software; you can redistribute it and/or modify it under the same 
 terms as Perl itself. 
 
 =cut

@@ -1,3 +1,10 @@
+$MODULE = "Tie::Cache"; $VERSION = .19; $DATE = '02/23/2012';
+
++ added cleaner ref() checking for data size calculations when using a MaxBytes cache, to address bug
+   https://rt.cpan.org/Public/Bug/Display.html?id=69976
+
++ updated test.pl to "use Tie::Cache" to prevent test conflicts with Cache.pm
+
 $MODULE = "Tie::Cache"; $VERSION = .17; $DATE = '07/03/2002';
 
 + added tied(%cache)->flush() method to sync dirty writes

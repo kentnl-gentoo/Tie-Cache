@@ -44,26 +44,26 @@ SYNOPSIS
      %cache = ();         # CLEAR
 
 DESCRIPTION
-    This module implements a least recently used (LRU) cache in memory
-    through a tie interface. Any time data is stored in the tied hash, that
-    key/value pair has an entry time associated with it, and as the cache
-    fills up, those members of the cache that are the oldest are removed to
-    make room for new entries.
+    This module implements a least recently used (LRU) cache in memory through a
+    tie interface. Any time data is stored in the tied hash, that key/value pair
+    has an entry time associated with it, and as the cache fills up, those
+    members of the cache that are the oldest are removed to make room for new
+    entries.
 
-    So, the cache only "remembers" the last written entries, up to the size
-    of the cache. This can be especially useful if you access great amounts
-    of data, but only access a minority of the data a majority of the time.
+    So, the cache only "remembers" the last written entries, up to the size of
+    the cache. This can be especially useful if you access great amounts of
+    data, but only access a minority of the data a majority of the time.
 
-    The implementation is a hash, for quick lookups, overlaying a doubly
-    linked list for quick insertion and deletion. On a WinNT PII 300, writes
-    to the hash were done at a rate 3100 per second, and reads from the hash
-    at 6300 per second. Work has been done to optimize refreshing cache
-    entries that are frequently read from, code like $cache{entry}, which
-    moves the entry to the end of the linked list internally.
+    The implementation is a hash, for quick lookups, overlaying a doubly linked
+    list for quick insertion and deletion. On a WinNT PII 300, writes to the
+    hash were done at a rate 3100 per second, and reads from the hash at 6300
+    per second. Work has been done to optimize refreshing cache entries that are
+    frequently read from, code like $cache{entry}, which moves the entry to the
+    end of the linked list internally.
 
 INSTALLATION
-    Tie::Cache installs easily using the make or nmake commands as shown
-    below. Otherwise, just copy Cache.pm to $PERLLIB/site/Tie
+    Tie::Cache installs easily using the make or nmake commands as shown below.
+    Otherwise, just copy Cache.pm to $PERLLIB/site/Tie
 
             > perl Makefile.PL
             > make
@@ -74,37 +74,38 @@ INSTALLATION
             ** you can also just copy Cache.pm to $perllib/Tie
 
 BENCMARKS
-    There is another simpler LRU cache implementation in CPAN,
-    Tie::Cache::LRU, which has the same basic size limiting functionality,
-    and for this functionality, the exact same interface.
+    There is another simpler LRU cache implementation in CPAN, Tie::Cache::LRU,
+    which has the same basic size limiting functionality, and for this
+    functionality, the exact same interface.
 
-    Through healthy competition, Michael G Schwern got Tie::Cache::LRU
-    mostly faster than Tie::Cache on reads & writes:
+    Through healthy competition, Michael G Schwern got Tie::Cache::LRU mostly
+    faster than Tie::Cache on reads & writes:
 
-     Cache Size 5000       Tie::Cache 0.17  Tie::Cache::LRU 0.21
-     10000 Writes             1.55 CPU sec          1.10 CPU sec
-     40000 Reads              1.82 CPU sec          1.58 CPU sec
-     10000 Deletes            0.55 CPU sec          0.59 CPU sec
+     Cache Size 5000       Tie::Cache 0.17  Tie::Cache::LRU 20110205.00
+     10000 Writes             0.63 CPU sec          0.47 CPU sec
+     40000 Reads              0.79 CPU sec          0.71 CPU sec
+     10000 Deletes            0.23 CPU sec          0.26 CPU sec
 
     Unless you are using TRUE CACHE or MaxBytes functionality, using
-    Tie::Cache::LRU should be an easy replacement for Tie::Cache.
+    Tie::Cache::LRU could be an easy replacement for Tie::Cache.
+
+    OTOH one nice thing about this module is its lack of external module
+    dependencies!
 
 TRUE CACHE
-    To use class as a true cache, which acts as the sole interface for some
-    data set, subclass the real cache off Tie::Cache, with @ISA = qw(
-    'Tie::Cache' ) notation. Then override the read() method for behavior
-    when there is a cache miss, and the write() method for behavior when the
-    cache's data changes.
+    To use class as a true cache, which acts as the sole interface for some data
+    set, subclass the real cache off Tie::Cache, with @ISA = qw( 'Tie::Cache' )
+    notation. Then override the read() method for behavior when there is a cache
+    miss, and the write() method for behavior when the cache's data changes.
 
-    When WriteSync is 1 or TRUE (DEFAULT), write() is called immediately
-    when data in the cache is modified. If set to 0, data that has been
-    modified in the cache gets written out when the entries are deleted or
-    during the DESTROY phase of the cache object, usually at the end of a
-    script.
+    When WriteSync is 1 or TRUE (DEFAULT), write() is called immediately when
+    data in the cache is modified. If set to 0, data that has been modified in
+    the cache gets written out when the entries are deleted or during the
+    DESTROY phase of the cache object, usually at the end of a script.
 
     To have the dirty data write() periodically while WriteSync is set to 0,
-    there is a flush() cache API call that will flush the dirty writes in
-    this way. Just call the flush() API like:
+    there is a flush() cache API call that will flush the dirty writes in this
+    way. Just call the flush() API like:
 
       my $write_flush_count = tied(%cache)->flush();
 
@@ -164,9 +165,10 @@ AUTHOR
     chamas@alumni.stanford.org
 
 COPYRIGHT
-    Copyright (c) 1999-2002 Joshua Chamas, Chamas Enterprises Inc. Sponsored
-    by development on NodeWorks http://www.nodeworks.com
+    Copyright (c) 1999-2012 Joshua Chamas, Chamas Enterprises Inc. Sponsored by
+    development on NodeWorks http://nodeworks.com and Web Test.org
+    http://web-test.org
 
-    All rights reserved. This program is free software; you can redistribute
-    it and/or modify it under the same terms as Perl itself.
+    All rights reserved. This program is free software; you can redistribute it
+    and/or modify it under the same terms as Perl itself.
 
