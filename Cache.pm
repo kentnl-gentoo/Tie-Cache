@@ -7,7 +7,7 @@ use vars qw(
  $BEFORE $AFTER $KEY $VALUE $BYTES $DIRTY
 );
 
-$VERSION = .17;
+$VERSION = .21;
 $Debug = 0; # set to 1 for summary, 2 for debug output
 $STRUCT_SIZE = 240; # per cached elem bytes overhead, approximate
 $REF_SIZE    = 16;

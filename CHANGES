@@ -1,3 +1,7 @@
+$MODULE = "Tie::Cache"; $VERSION = .21; $DATE = '05/19/2014';
+
++ fixed internal $VERSION number
+
 $MODULE = "Tie::Cache"; $VERSION = .19; $DATE = '02/23/2012';
 
 + added cleaner ref() checking for data size calculations when using a MaxBytes cache, to address bug
